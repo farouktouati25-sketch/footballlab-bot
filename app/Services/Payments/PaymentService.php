@@ -131,7 +131,7 @@ class PaymentService
             $b = $booking->fresh(['contact']);
             if ($b->contact) {
                 $this->messenger->updateClient($b->contact, $b->reference,
-                    "Payment received ✅ for booking {$b->reference}. The team will confirm your spot here shortly.");
+                    "Payment received ✅ Booking {$b->reference}, your confirmation comes here 👊");
             }
         }
         if (! $handled) {

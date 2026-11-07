@@ -19,6 +19,9 @@ class AgentTools
         private readonly \App\Services\Booking\ReminderService $reminders,
     ) {}
 
+    /** Set by a tool when the client must get NO reply now (the admins decide first). */
+    public bool $silent = false;
+
     public static function definitions(): array
     {
         return [
@@ -53,11 +56,17 @@ class AgentTools
                 ],
             ],
             [
-                'name' => 'pay_cash_on_spot',
-                'description' => 'ONLY when the client themselves says they want to pay on the spot / pay cash at the pitch. Never offer cash yourself. Sends the booking to the team, who decide whether to accept cash.',
+                'name' => 'pay_later',
+                'description' => 'The client says they pay after the game, pay cash on the spot, or are used to paying later (old clients). Never offer this yourself. Books them pending the admins\' OK and stays silent: the client gets NO reply from you now. Pass game_id + player_name + players for a new booking, or booking_reference if they already have one.',
                 'input_schema' => [
                     'type' => 'object',
-                    'properties' => ['booking_reference' => ['type' => 'string']],
+                    'properties' => [
+                        'game_id' => ['type' => 'integer'],
+                        'player_name' => ['type' => 'string'],
+                        'players' => ['type' => 'integer', 'minimum' => 1],
+                        'booking_reference' => ['type' => 'string'],
+                        'what_they_said' => ['type' => 'string', 'description' => 'Their words, short, e.g. "I always pay after the game"'],
+                    ],
                 ],
             ],
             [
@@ -111,7 +120,7 @@ class AgentTools
             ],
             [
                 'name' => 'handoff_to_human',
-                'description' => 'Pass the chat to the team: refunds, complaints, private pitch bookings, tournaments, corporate events, groups larger than the booking limit, anything you cannot answer from the facts, or when the client asks for a person. The bot stops replying in this chat afterwards.',
+                'description' => 'Silently pass the chat to the team (the client gets no reply from you; the admins answer): refunds, complaints, private pitch bookings, tournaments, corporate events, groups larger than the booking limit, anything you cannot answer from the facts, or when the client asks for a person. The bot stops replying in this chat afterwards.',
                 'input_schema' => [
                     'type' => 'object',
                     'properties' => ['reason' => ['type' => 'string']],
@@ -127,7 +136,7 @@ class AgentTools
             'list_games' => $this->listGames(),
             'create_booking' => $this->createBooking($contact, $input),
             'report_payment' => $this->reportPayment($contact, $input),
-            'pay_cash_on_spot' => $this->payCash($contact, $input),
+            'pay_later', 'pay_cash_on_spot' => $this->payLater($contact, $input),
             'my_bookings' => $this->myBookings($contact),
             'save_player_profile' => $this->reminders->saveProfile($contact, isset($input['name']) ? (string) $input['name'] : null, (array) ($input['days'] ?? [])),
             'remember_availability' => $this->reminders->remember($contact, (string) ($input['date'] ?? ''), (int) ($input['players'] ?? 1)),
@@ -185,7 +194,7 @@ class AgentTools
             'payment_link' => $link,
             'hold_minutes' => (int) config('fbl.payment_timeout_minutes', 120),
             'instructions' => ! $link && config('fbl.payments.mode') === 'admin_link'
-                ? 'The team will send this client a personal payment link here shortly. Tell them that, with the reference and amount, and that once the link arrives they pay and send the screenshot. Do not invent a link.'
+                ? 'A personal payment link is being prepared. Tell them in one friendly line: booked, the reference and amount, payment link coming in a moment, then pay and send the screenshot here. Never say you will check with the team. Do not invent a link.'
                 : ($link
                 ? ($online
                     ? 'Send the amount and this personal payment link. Payment is detected automatically, so no screenshot is needed; the client gets a message here once paid. Spot is held for hold_minutes.'
@@ -209,19 +218,39 @@ class AgentTools
             return ['error' => 'Booking '.$booking->reference.' can no longer take a payment report (status '.$booking->status.', or the hold expired and the game filled up). Hand off to a human so the team can check the payment.'];
         }
 
+        $this->silent = true; // admins confirm; the client hears back only with the confirmation
+
         return ['ok' => true, 'booking_reference' => $booking->reference, 'status' => 'awaiting_approval',
-            'instructions' => 'Tell the client the team is checking the payment and will confirm here shortly.'];
+            'instructions' => 'Done. Do not reply to the client.'];
     }
 
-    private function payCash(Contact $contact, array $input): array
+    private function payLater(Contact $contact, array $input): array
     {
-        $result = $this->reportPayment($contact, ['booking_reference' => $input['booking_reference'] ?? '', 'note' => Booking::CASH_NOTE]);
-        if (isset($result['error'])) {
-            return $result;
+        $note = Booking::PAY_LATER_NOTE.(! empty($input['what_they_said']) ? ': '.mb_substr((string) $input['what_they_said'], 0, 150) : '');
+
+        $booking = $this->ownBooking($contact, (string) ($input['booking_reference'] ?? ''))
+            ?? $contact->bookings()->where('status', 'pending_payment')
+                ->when(! empty($input['game_id']), fn ($q) => $q->where('game_id', (int) $input['game_id']))
+                ->latest()->first();
+
+        if (! $booking) {
+            if (empty($input['game_id']) || empty($input['player_name'])) {
+                return ['error' => 'Need game_id and player_name (ask for the name if you don\'t know it).'];
+            }
+            // No payment link: the admins decide whether this client can pay later.
+            $result = $this->bookings->create($contact, (int) $input['game_id'], (string) $input['player_name'], (int) ($input['players'] ?? 1));
+            if (! $result['ok']) {
+                return ['error' => $result['error']];
+            }
+            $booking = $result['booking'];
         }
 
-        return ['ok' => true, 'booking_reference' => $result['booking_reference'],
-            'instructions' => 'Tell the client you asked the team if cash on the spot is OK and they will confirm here shortly. Do not promise it is accepted.'];
+        if (! $this->bookings->reportPayment($booking, null, $note)) {
+            return ['error' => 'Could not send this to the team (booking '.$booking->status.' or game full). Offer other games or the waiting list.'];
+        }
+        $this->silent = true;
+
+        return ['ok' => true, 'instructions' => 'Done. Do not reply to the client.'];
     }
 
     private function joinWaitlist(Contact $contact, array $input): array
@@ -285,11 +314,15 @@ class AgentTools
         $reason = (string) ($input['reason'] ?? 'Client needs a person');
         $contact->update(['bot_paused_until' => now()->addHours((int) config('fbl.human_takeover_hours', 12))]);
 
+        $last = (string) $contact->messages()->where('direction', 'in')->latest('id')->value('body');
         foreach ($this->messenger->adminContacts() as $admin) {
-            $this->messenger->alertAdmin($admin, "🙋 {$contact->displayName()} (+{$contact->wa_id}) needs a person: {$reason}. Bot is paused in that chat. Reply to them from the WhatsApp app.");
+            $this->messenger->alertAdmin($admin, "🙋 {$contact->displayName()} (+{$contact->wa_id}): {$reason}\n"
+                .($last !== '' ? "💬 \"".mb_substr($last, 0, 300)."\"\n" : '')
+                ."I didn't reply. Answer them from the WhatsApp app (bot is paused in that chat).");
         }
+        $this->silent = true;
 
-        return ['ok' => true, 'instructions' => 'Tell the client a team member will reply here shortly. Do not promise a specific time.'];
+        return ['ok' => true, 'instructions' => 'Done. Do not reply to the client.'];
     }
 
     private function ownBooking(Contact $contact, string $reference): ?Booking

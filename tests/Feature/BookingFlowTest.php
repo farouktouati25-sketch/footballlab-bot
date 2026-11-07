@@ -124,7 +124,7 @@ class BookingFlowTest extends TestCase
 
         // Client is told we're checking.
         Http::assertSent(fn (Request $r) => ($r->data()['to'] ?? null) === self::CLIENT
-            && str_contains($r->data()['text']['body'] ?? '', "checking your payment"));
+            && str_contains($r->data()['text']['body'] ?? '', "Received ✅"));
     }
 
     public function test_first_admin_tap_wins_and_client_is_confirmed(): void

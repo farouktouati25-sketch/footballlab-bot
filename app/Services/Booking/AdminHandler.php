@@ -215,6 +215,35 @@ class AdminHandler
         };
     }
 
+    private function payFirstInstead(Contact $admin, Booking $booking): void
+    {
+        $moved = Booking::whereKey($booking->id)->where('status', 'awaiting_approval')->update([
+            'status' => 'pending_payment', 'payment_note' => null, 'payment_reported_at' => null, 'link_requested_at' => null, 'created_at' => now(),
+        ]);
+        if (! $moved) {
+            $this->notifier->alreadyDecided($admin, $booking->fresh());
+
+            return;
+        }
+        $b = $booking->fresh(['game', 'contact']);
+        $payments = app(\App\Services\Payments\PaymentService::class);
+        $link = $payments->linkFor($b); // admin_link mode: asks you for the link (reply to that message)
+
+        if ($link && $b->contact) {
+            $minutes = (int) config('fbl.payment_timeout_minutes', 120);
+            $this->messenger->updateClient($b->contact, $b->reference,
+                "Booked ✅ {$b->game->label()}\n💰 {$b->amountLabel()}, pay here: {$link}\nSend the screenshot after paying 👊 (spot held {$minutes} min)");
+        }
+        foreach ($this->messenger->adminContacts() as $other) {
+            if ($other->wa_id !== $admin->wa_id) {
+                $this->messenger->alertAdmin($other, "{$b->reference}: {$admin->adminName()} chose pay-first for {$b->player_name}.");
+            }
+        }
+        $this->reply($admin, $link
+            ? "💳 {$b->player_name} got the payment link for {$b->reference}."
+            : "💳 OK, {$b->player_name} pays first. Reply to the link request above with the payment link.");
+    }
+
     private function waitlistAnswer(Contact $admin, int $entryId, bool $send): void
     {
         $entry = \App\Models\WaitlistEntry::with(['contact', 'game'])->find($entryId);
@@ -237,6 +266,15 @@ class AdminHandler
 
     private function decide(Contact $admin, int $bookingId, bool $approve): void
     {
+        // "Pay later" refused: not a rejection, they just pay first like everyone else.
+        $pending = Booking::with(['game', 'contact'])->find($bookingId);
+        if (! $approve && $pending && $pending->status === 'awaiting_approval' && $pending->wantsCash()
+            && ! $pending->payment_proof_media_id && ! $pending->payment_verified) {
+            $this->payFirstInstead($admin, $pending);
+
+            return;
+        }
+
         $outcome = $this->bookings->decide($bookingId, $admin, $approve);
         if (! $approve && $outcome['result'] === 'done' && isset($outcome['booking'])) {
             $this->roster->offerFreedSpots($outcome['booking']->game);

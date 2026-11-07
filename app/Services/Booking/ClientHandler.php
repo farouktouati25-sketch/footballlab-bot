@@ -47,7 +47,11 @@ class ClientHandler
             $reply = $this->agent->reply($contact);
         } catch (\Throwable $e) {
             Log::error('Agent failed', ['contact' => $contact->wa_id, 'error' => $e->getMessage()]);
-            $reply = "Thanks for your message! A team member will reply shortly ⚽";
+            $reply = null;
+            $last = mb_substr((string) $logged->body, 0, 300);
+            foreach ($this->messenger->adminContacts() as $admin) {
+                $this->messenger->alertAdmin($admin, "⚠️ The bot couldn't answer {$contact->displayName()} (+{$contact->wa_id}): \"{$last}\". Reply from the WhatsApp app.");
+            }
         }
 
         if ($reply) {
@@ -84,8 +88,8 @@ class ClientHandler
         }
 
         $this->messenger->text($contact->fresh(), $alreadyReported
-            ? "Thanks, we've added this to booking {$booking->reference}. The team will confirm here shortly 🙏"
-            : "Got it 🙏 We're checking your payment for booking {$booking->reference}.\nYou'll get a confirmation message here shortly.");
+            ? "Got it ✅ Added to booking {$booking->reference}."
+            : "Received ✅ Booking {$booking->reference}, your confirmation comes here 👊");
 
         return true;
     }

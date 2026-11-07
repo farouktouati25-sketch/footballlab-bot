@@ -10,12 +10,13 @@ class Booking extends Model
 {
     public const OPEN_STATUSES = ['pending_payment', 'awaiting_approval', 'confirmed'];
 
-    /** payment_note marker: client asked to pay cash at the pitch (not paid yet). */
-    public const CASH_NOTE = 'CASH on the spot';
+    /** payment_note marker: client wants to pay later (after the game / cash at the pitch), not paid yet. */
+    public const PAY_LATER_NOTE = 'PAY LATER';
 
     public function wantsCash(): bool
     {
-        return str_starts_with((string) $this->payment_note, self::CASH_NOTE);
+        return str_starts_with((string) $this->payment_note, self::PAY_LATER_NOTE)
+            || str_starts_with((string) $this->payment_note, 'CASH on the spot');
     }
 
     protected $fillable = [

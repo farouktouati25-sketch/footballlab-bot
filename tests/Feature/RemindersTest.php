@@ -140,24 +140,74 @@ class RemindersTest extends TestCase
         $this->assertTrue(Contact::where('wa_id', '971500000008')->sole()->botIsPaused());
     }
 
-    public function test_client_wanting_to_pay_cash_goes_to_admins(): void
+    public function test_old_client_paying_after_the_game_goes_silently_to_admins(): void
     {
         Contact::create(['wa_id' => '971500000091', 'last_inbound_at' => now()]);
-        $client = Contact::create(['wa_id' => '971500000001', 'name' => 'Ali', 'last_inbound_at' => now()]);
+        Contact::create(['wa_id' => '971500000001', 'name' => 'Omar', 'last_inbound_at' => now()]);
         $game = Game::create(['starts_at' => now()->addDays(2), 'venue' => 'Al Safa', 'price' => 50, 'capacity' => 14, 'status' => 'published']);
-        $booking = Booking::create(['contact_id' => $client->id, 'game_id' => $game->id, 'player_name' => 'Ali', 'players' => 1, 'amount' => 50, 'status' => 'pending_payment']);
 
         $this->claude = [
-            ['content' => [['type' => 'tool_use', 'id' => 't1', 'name' => 'pay_cash_on_spot', 'input' => ['booking_reference' => $booking->reference]]], 'stop_reason' => 'tool_use'],
-            ['content' => [['type' => 'text', 'text' => 'Sure bro, asking the team 👊']], 'stop_reason' => 'end_turn'],
+            ['content' => [['type' => 'tool_use', 'id' => 't1', 'name' => 'pay_later', 'input' => [
+                'game_id' => $game->id, 'player_name' => 'Omar', 'players' => 1, 'what_they_said' => 'I always pay after the game']]], 'stop_reason' => 'tool_use'],
+            ['content' => [['type' => 'text', 'text' => 'I will check with the team']], 'stop_reason' => 'end_turn'],
         ];
-        $this->inbound('971500000001', "I'll pay cash on the spot");
+        $this->inbound('971500000001', 'Add me Friday, I pay after the game as usual');
 
-        $this->assertSame('awaiting_approval', $booking->fresh()->status);
-        $this->assertTrue($booking->fresh()->wantsCash());
+        $booking = Booking::sole();
+        $this->assertSame('awaiting_approval', $booking->status);
+        $this->assertTrue($booking->wantsCash());
+        // The client gets nothing; no payment link was asked for.
+        Http::assertNotSent(fn (Request $r) => ($r->data()['to'] ?? null) === '971500000001');
+        $this->assertNull($booking->link_requested_at);
         Http::assertSent(fn (Request $r) => ($r->data()['to'] ?? null) === '971500000091'
-            && str_contains($r->data()['interactive']['body']['text'] ?? '', 'PAY CASH ON THE SPOT')
-            && str_contains(json_encode($r->data(), JSON_UNESCAPED_UNICODE), 'Accept cash'));
+            && str_contains($r->data()['interactive']['body']['text'] ?? '', 'PAY LATER')
+            && str_contains($r->data()['interactive']['body']['text'] ?? '', 'I always pay after the game')
+            && str_contains(json_encode($r->data(), JSON_UNESCAPED_UNICODE), 'Book him'));
+
+        // Admin taps "Send link" → not rejected, back to pay-first, admins asked for the link.
+        $this->tap('reject:'.$booking->id);
+        $this->assertSame('pending_payment', $booking->fresh()->status);
+        $this->assertNotNull($booking->fresh()->link_requested_at);
+        Http::assertSent(fn (Request $r) => ($r->data()['to'] ?? null) === '971500000091'
+            && str_contains($r->data()['text']['body'] ?? '', 'needs a payment link'));
+    }
+
+    public function test_pay_later_approved_confirms_with_pay_after_game_note(): void
+    {
+        Contact::create(['wa_id' => '971500000091', 'last_inbound_at' => now()]);
+        $client = Contact::create(['wa_id' => '971500000001', 'name' => 'Omar', 'last_inbound_at' => now()]);
+        $game = Game::create(['starts_at' => now()->addDays(2), 'venue' => 'Al Safa', 'price' => 50, 'capacity' => 14, 'status' => 'published']);
+        $booking = Booking::create(['contact_id' => $client->id, 'game_id' => $game->id, 'player_name' => 'Omar', 'players' => 1,
+            'amount' => 50, 'status' => 'awaiting_approval', 'payment_note' => Booking::PAY_LATER_NOTE]);
+
+        $this->tap('approve:'.$booking->id);
+
+        $this->assertSame('confirmed', $booking->fresh()->status);
+        Http::assertSent(fn (Request $r) => ($r->data()['to'] ?? null) === '971500000001'
+            && str_contains($r->data()['text']['body'] ?? '', 'pay after the game'));
+    }
+
+    public function test_handoff_sends_nothing_to_the_client(): void
+    {
+        Contact::create(['wa_id' => '971500000091', 'last_inbound_at' => now()]);
+        $this->claude = [
+            ['content' => [['type' => 'tool_use', 'id' => 't1', 'name' => 'handoff_to_human', 'input' => ['reason' => 'Asks about a corporate event']]], 'stop_reason' => 'tool_use'],
+            ['content' => [['type' => 'text', 'text' => 'A team member will reply shortly']], 'stop_reason' => 'end_turn'],
+        ];
+        $this->inbound('971500000001', 'Can you host a company tournament for 40 people?');
+
+        Http::assertNotSent(fn (Request $r) => ($r->data()['to'] ?? null) === '971500000001');
+        Http::assertSent(fn (Request $r) => ($r->data()['to'] ?? null) === '971500000091'
+            && str_contains($r->data()['text']['body'] ?? '', 'company tournament'));
+    }
+
+    private function tap(string $buttonId): void
+    {
+        $this->webhook(['field' => 'messages', 'value' => [
+            'contacts' => [['wa_id' => '971500000091', 'profile' => ['name' => 'Farouk']]],
+            'messages' => [['type' => 'interactive', 'interactive' => ['type' => 'button_reply', 'button_reply' => ['id' => $buttonId, 'title' => 'x']],
+                'id' => 'wamid.in.'.uniqid(), 'from' => '971500000091', 'timestamp' => (string) time()]],
+        ]]);
     }
 
     public function test_freed_spot_asks_admin_then_offers_to_next_waiting_client(): void
