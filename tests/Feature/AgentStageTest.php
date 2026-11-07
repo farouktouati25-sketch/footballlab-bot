@@ -25,6 +25,7 @@ class AgentStageTest extends TestCase
         $this->assertStringContainsString('Do NOT mention prices, payment, booking or upcoming games', $prompt);
         $this->assertStringContainsString('if they play football frequently', $prompt);
         $this->assertStringContainsString("Don't ask about their level", $prompt);
+        $this->assertStringContainsString('we play every day', $prompt);
         $this->assertStringContainsString("Never ask if they've played WITH US", $prompt);
         $this->assertStringContainsString('Suggest joining our community group', $prompt);
         $this->assertStringContainsString("we'll send them a reminder for that game", $prompt);
