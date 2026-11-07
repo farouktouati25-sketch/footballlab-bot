@@ -52,4 +52,24 @@ class AgentStageTest extends TestCase
         $this->assertStringContainsString('Hey Omar 👊', $prompt);
         $this->assertStringNotContainsString('NEW LEAD', $prompt);
     }
+
+    public function test_admin_in_test_mode_gets_the_new_lead_flow_and_a_clean_history(): void
+    {
+        config(['whatsapp.admins' => ['971500000091']]);
+        $admin = Contact::create(['wa_id' => '971500000091', 'player_name' => 'Farouk', 'act_as_client' => true]);
+        Message::create(['contact_id' => $admin->id, 'direction' => 'out', 'author' => 'bot', 'type' => 'text', 'body' => 'FootballLab bot · admin commands']);
+        Message::create(['contact_id' => $admin->id, 'direction' => 'in', 'author' => 'admin', 'type' => 'text', 'body' => '#test']);
+        Message::create(['contact_id' => $admin->id, 'direction' => 'out', 'author' => 'bot', 'type' => 'text', 'body' => 'Test mode ON']);
+        Message::create(['contact_id' => $admin->id, 'direction' => 'in', 'author' => 'client', 'type' => 'text', 'body' => 'Hey i saw your ad']);
+
+        $agent = app(BookingAgent::class);
+        $this->assertFalse($agent->isReturning($admin));
+        $this->assertStringContainsString('NEW LEAD', $agent->systemPrompt($admin));
+
+        \Illuminate\Support\Facades\Http::fake(['*' => \Illuminate\Support\Facades\Http::response(['content' => [['type' => 'text', 'text' => 'Welcome to Football Lab ⚽']], 'stop_reason' => 'end_turn'])]);
+        $agent->reply($admin);
+        \Illuminate\Support\Facades\Http::assertSent(fn ($r) => str_contains($r->url(), 'anthropic')
+            && count($r->data()['messages']) === 1
+            && $r->data()['messages'][0]['content'] === 'Hey i saw your ad');
+    }
 }

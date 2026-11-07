@@ -18,6 +18,8 @@ class BookingAgent
         $this->tools->silent = false;
 
         $rows = $contact->messages()
+            // Admin in #test mode: start from a clean chat, as a brand-new lead would.
+            ->when($this->testStartId($contact), fn ($q, $id) => $q->where('id', '>', $id))
             ->latest('id')
             ->limit((int) config('claude.history_limit', 24))
             ->get(['author', 'body'])
@@ -95,6 +97,10 @@ class BookingAgent
      */
     public function isReturning(Contact $contact): bool
     {
+        if ($this->testStartId($contact)) {
+            return false; // admins testing see the new-lead flow
+        }
+
         return $contact->player_name
             || $contact->bookings()->exists()
             || $contact->messages()->where('author', 'human')->exists()
@@ -123,7 +129,7 @@ class BookingAgent
 WHO THIS IS: a RETURNING player (they've booked, chatted with the team, or messaged us before). They know us.
 - No welcome speech, no explaining what FootballLab is, no group link (unless they ask).
 - Greet them like a regular ("Hey {$this->firstName($contact)} 👊"), then ask which day they want to play, unless they already said it.
-- Then call list_games and offer the game(s) for that day.
+- Don't list games or prices before they tell you the day. Then call list_games and offer the game(s) for that day only.
 STAGE
             : <<<STAGE
 WHO THIS IS: a NEW LEAD (first conversation with us, often from an ad). Don't sell yet: have a friendly chat and get them into the group.
@@ -200,5 +206,15 @@ PROMPT;
         $name = trim((string) ($contact->player_name ?: $contact->name));
 
         return $name !== '' ? (preg_split('/\s+/u', $name)[0] ?? 'bro') : 'bro';
+    }
+
+    /** Id of the admin's last "#test" message while test mode is on, else null. */
+    private function testStartId(Contact $contact): ?int
+    {
+        if (! $contact->act_as_client || ! $contact->isAdmin()) {
+            return null;
+        }
+
+        return $contact->messages()->where('direction', 'in')->where('body', 'like', '#test%')->max('id');
     }
 }
