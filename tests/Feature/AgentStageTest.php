@@ -22,9 +22,10 @@ class AgentStageTest extends TestCase
         $this->assertFalse($agent->isReturning($lead));
         $prompt = $agent->systemPrompt($lead);
         $this->assertStringContainsString('NEW LEAD', $prompt);
-        $this->assertStringContainsString('Invite them to our community group', $prompt);
-        $this->assertStringContainsString('Ask which day(s) they\'d like to play', $prompt);
-        $this->assertStringContainsString('aren\'t scheduled yet', $prompt);
+        $this->assertStringContainsString('Do NOT mention prices, payment, booking or upcoming games', $prompt);
+        $this->assertStringContainsString("What's their level?", $prompt);
+        $this->assertStringContainsString('Suggest joining our community group', $prompt);
+        $this->assertStringContainsString("we'll send them a reminder for that game", $prompt);
     }
 
     public function test_known_players_skip_the_intro(): void
