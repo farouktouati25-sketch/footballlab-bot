@@ -25,6 +25,8 @@
         <env name="DB_DATABASE" value=":memory:" force="true"/>
         <env name="QUEUE_CONNECTION" value="sync" force="true"/>
         <env name="SESSION_DRIVER" value="array" force="true"/>
+        <env name="WHATSAPP_PROVIDER" value="meta" force="true"/>
+        <env name="WHATSAPP_WEBHOOK_SECRET" value="" force="true"/>
         <env name="WHATSAPP_TOKEN" value="test-token" force="true"/>
         <env name="WHATSAPP_PHONE_NUMBER_ID" value="PHONE_ID" force="true"/>
         <env name="WHATSAPP_APP_SECRET" value="test-secret" force="true"/>
