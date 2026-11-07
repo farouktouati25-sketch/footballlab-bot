@@ -15,6 +15,7 @@ class AgentTools
         private readonly BookingService $bookings,
         private readonly Messenger $messenger,
         private readonly \App\Services\Booking\RosterService $roster,
+        private readonly \App\Services\Payments\PaymentService $payments,
     ) {}
 
     public static function definitions(): array
@@ -138,7 +139,8 @@ class AgentTools
         }
 
         $booking = $result['booking'];
-        $link = $booking->game->paymentLink();
+        $link = $this->payments->linkFor($booking);
+        $online = (bool) $booking->fresh()->payment_intent_id;
 
         return [
             'booking_reference' => $booking->reference,
@@ -148,7 +150,9 @@ class AgentTools
             'payment_link' => $link,
             'hold_minutes' => (int) config('fbl.payment_timeout_minutes', 120),
             'instructions' => $link
-                ? 'Send the amount and payment link. Ask the client to send the payment screenshot here after paying. Spot is held for hold_minutes.'
+                ? ($online
+                    ? 'Send the amount and this personal payment link. Payment is detected automatically, so no screenshot is needed; the client gets a message here once paid. Spot is held for hold_minutes.'
+                    : 'Send the amount and payment link. Ask the client to send the payment screenshot here after paying. Spot is held for hold_minutes.')
                 : 'No payment link is configured: hand off to a human so the team can send payment details.',
         ];
     }
@@ -208,7 +212,7 @@ class AgentTools
             'players' => $b->players,
             'amount' => $b->amountLabel(),
             'status' => $b->status,
-            'payment_link' => $b->status === 'pending_payment' ? $b->game->paymentLink() : null,
+            'payment_link' => $b->status === 'pending_payment' ? $this->payments->linkFor($b) : null,
         ])->values()->all()];
     }
 

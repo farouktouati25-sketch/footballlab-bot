@@ -19,9 +19,11 @@ class ApprovalNotifier
         $game = $booking->game;
         $client = $booking->contact;
         $spotsAfter = $game->confirmedPlayers() + $booking->players;
-        $proof = $booking->payment_proof_media_id
+        $proof = $booking->payment_verified
+            ? 'PAID online via Ziina ✅ (verified)'
+            : ($booking->payment_proof_media_id
             ? 'screenshot attached'
-            : 'client says paid, NO screenshot'.($booking->payment_note ? ' ('.$booking->payment_note.')' : '');
+            : 'client says paid, NO screenshot'.($booking->payment_note ? ' ('.$booking->payment_note.')' : ''));
 
         $summary = "🆕 Booking {$booking->reference} needs your OK\n"
             ."👤 {$booking->player_name} · +{$client->wa_id}\n"

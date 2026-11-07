@@ -34,6 +34,20 @@ return [
         'payment_link' => env('FBL_DEFAULT_PAYMENT_LINK'),
     ],
 
+    // Online payments. With a Ziina API token, every booking gets its own pay link for the exact
+    // amount (price × players), and payment is confirmed automatically by Ziina's webhook.
+    'payments' => [
+        'ziina_token' => env('ZIINA_API_TOKEN', ''),
+        'ziina_webhook_secret' => env('ZIINA_WEBHOOK_SECRET', ''),
+        'ziina_test_mode' => (bool) env('ZIINA_TEST_MODE', false),
+        // Added on top of each booking (e.g. the 3 AED card fee). 0 = none.
+        'fee_per_booking' => (float) env('FBL_PAYMENT_FEE', 0),
+        // true = a Ziina-verified payment confirms the spot without an admin tap.
+        'auto_confirm_verified' => (bool) env('FBL_AUTO_CONFIRM_PAID', false),
+        // Optional page the client lands on after paying (e.g. wa.me link back to the bot).
+        'thank_you_url' => env('FBL_PAYMENT_RETURN_URL', 'https://wa.me/'.env('FBL_BOT_NUMBER', '971503741554')),
+    ],
+
     // Unpaid held spots are released after this many minutes.
     'payment_timeout_minutes' => (int) env('FBL_PAYMENT_TIMEOUT_MINUTES', 120),
 

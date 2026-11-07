@@ -18,6 +18,11 @@ class AppServiceProvider extends ServiceProvider
             provider: (string) config('whatsapp.provider'),
         ));
 
+        $this->app->singleton(\App\Services\Payments\ZiinaClient::class, fn () => new \App\Services\Payments\ZiinaClient(
+            token: (string) config('fbl.payments.ziina_token'),
+            testMode: (bool) config('fbl.payments.ziina_test_mode'),
+        ));
+
         $this->app->singleton(ClaudeClient::class, fn () => new ClaudeClient(
             apiKey: (string) config('claude.api_key'),
             model: (string) config('claude.model'),

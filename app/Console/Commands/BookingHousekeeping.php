@@ -12,14 +12,18 @@ class BookingHousekeeping extends Command
 
     protected $description = 'Release unpaid holds and remind admins about bookings waiting for approval';
 
-    public function handle(Messenger $messenger): int
+    public function handle(Messenger $messenger, \App\Services\Payments\PaymentService $payments): int
     {
+        // 0) Catch any Ziina payments whose webhook was missed, before releasing holds.
+        $payments->reconcile();
+
         $cutoff = now()->subMinutes((int) config('fbl.payment_timeout_minutes', 120));
 
         // 1) Unpaid holds past the timeout free their spots.
         //    lazyById: rows leave the filter as we go, so offset paging would skip some.
         //    Conditional update: an admin may confirm, or the client report payment, in the meantime.
         Booking::where('status', 'pending_payment')
+            ->where('payment_verified', false)
             ->where('created_at', '<=', $cutoff)
             ->lazyById(200)
             ->each(function (Booking $booking) use ($messenger, $cutoff) {
