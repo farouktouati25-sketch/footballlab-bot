@@ -28,7 +28,20 @@ return [
 
     // Admins who approve bookings. wa_id format: country code + number, no "+" or spaces.
     // e.g. ADMIN_NUMBERS="971501234567,971559876543" and ADMIN_NAMES="Farouk,Partner"
-    'admins' => array_values(array_filter(array_map('trim', explode(',', (string) env('ADMIN_NUMBERS', ''))))),
+    // UAE numbers are normalised, so "0501234567", "501234567", "+971 50 123 4567" all become 971501234567.
+    'admins' => array_values(array_filter(array_map(function ($n) {
+        $n = preg_replace('/\D+/', '', (string) $n);
+        if (str_starts_with($n, '00')) {
+            $n = substr($n, 2);
+        }
+        if (preg_match('/^05\d{8}$/', $n)) {
+            $n = '971'.substr($n, 1);
+        } elseif (preg_match('/^5\d{8}$/', $n)) {
+            $n = '971'.$n;
+        }
+
+        return $n;
+    }, explode(',', (string) env('ADMIN_NUMBERS', ''))))),
     'admin_names' => array_values(array_map('trim', explode(',', (string) env('ADMIN_NAMES', '')))),
 
     // Meta-approved templates, used when the 24h customer-service window is closed.
