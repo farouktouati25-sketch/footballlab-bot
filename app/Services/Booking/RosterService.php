@@ -97,7 +97,7 @@ class RosterService
         $render = function (string $line, ?string $name) use ($slot) {
             preg_match($slot, $line, $m);
 
-            return $name === null || $name === '' ? rtrim($m[1].$m[2].$m[3]) : $m[1].$m[2].$m[3].$name;
+            return $name === null || $name === '' ? rtrim($m[1].$m[2].$m[3]) : $m[1].$m[2].rtrim($m[3]).' '.$name;
         };
 
         foreach ($main as $k => $i) {
@@ -107,7 +107,7 @@ class RosterService
         $extra = [];
         for ($k = count($main); $k < count($names); $k++) {
             preg_match($slot, $lines[end($main)], $m);
-            $extra[] = $m[1].($k + 1).$m[3].$names[$k];
+            $extra[] = $m[1].($k + 1).rtrim($m[3]).' '.$names[$k];
         }
         if ($extra) {
             array_splice($lines, end($main) + 1, 0, $extra);
@@ -130,7 +130,7 @@ class RosterService
                     break;
                 }
                 if (trim($m[4]) === '') {
-                    $lines[$i] = $m[1].$m[2].$m[3].$waiting[$w++];
+                    $lines[$i] = $m[1].$m[2].rtrim($m[3]).' '.$waiting[$w++];
                 }
             }
         }
