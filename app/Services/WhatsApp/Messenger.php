@@ -15,13 +15,13 @@ class Messenger
     public function __construct(private readonly WhatsAppClient $client) {}
 
     /** Free-form text. Only valid inside the 24h window. */
-    public function text(Contact $to, string $body, string $author = 'bot'): bool
+    public function text(Contact $to, string $body, string $author = 'bot', array $meta = []): bool
     {
         if (! $to->windowIsOpen()) {
             return false;
         }
 
-        return $this->dispatch($to, Payloads::text($to->wa_id, $body), 'text', $body, $author);
+        return $this->dispatch($to, Payloads::text($to->wa_id, $body), 'text', $body, $author, $meta);
     }
 
     /** @param array<string,string> $buttons id => title */
@@ -55,7 +55,7 @@ class Messenger
     }
 
     /** Templates work at any time (they must be approved in WhatsApp Manager first). */
-    public function template(Contact $to, string $name, array $bodyParams = [], array $quickReplyPayloads = []): bool
+    public function template(Contact $to, string $name, array $bodyParams = [], array $quickReplyPayloads = [], array $meta = []): bool
     {
         $payload = Payloads::template(
             $to->wa_id,
@@ -71,16 +71,16 @@ class Messenger
             'template',
             $name.': '.implode(' | ', array_map('strval', $bodyParams)),
             'bot',
-            ['template' => $name, 'payloads' => $quickReplyPayloads]
+            $meta + ['template' => $name, 'payloads' => $quickReplyPayloads]
         );
     }
 
     /** Text if the window is open, otherwise the generic admin_alert template. */
-    public function alertAdmin(Contact $admin, string $text): bool
+    public function alertAdmin(Contact $admin, string $text, array $meta = []): bool
     {
         return $admin->windowIsOpen()
-            ? $this->text($admin, $text)
-            : $this->template($admin, (string) config('whatsapp.templates.admin_alert'), [$text]);
+            ? $this->text($admin, $text, 'bot', $meta)
+            : $this->template($admin, (string) config('whatsapp.templates.admin_alert'), [$text], [], $meta);
     }
 
     /** Text if the window is open, otherwise the booking_update template. */

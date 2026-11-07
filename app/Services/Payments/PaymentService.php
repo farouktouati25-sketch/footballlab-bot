@@ -27,7 +27,15 @@ class PaymentService
             return $booking->payment_url;
         }
 
-        if (! $this->ziina->enabled()) {
+        $mode = config('fbl.payments.mode', 'admin_link');
+
+        if ($mode === 'admin_link') {
+            $this->requestLinkFromAdmins($booking);
+
+            return null; // the client is told a team member will send it
+        }
+
+        if ($mode !== 'ziina' || ! $this->ziina->enabled()) {
             return $booking->game->paymentLink();
         }
 
@@ -50,6 +58,56 @@ class PaymentService
         $booking->update(['payment_intent_id' => $intent['id'], 'payment_url' => $intent['url']]);
 
         return $intent['url'];
+    }
+
+    /** Ask admins to reply with a payment link for this booking (once). */
+    public function requestLinkFromAdmins(Booking $booking): void
+    {
+        if ($booking->link_requested_at) {
+            return;
+        }
+        $booking->update(['link_requested_at' => now()]);
+        $b = $booking->fresh(['game', 'contact']);
+
+        $text = "💳 {$b->reference} needs a payment link\n"
+            ."👤 {$b->player_name}".($b->contact ? ' · +'.$b->contact->wa_id : '')."\n"
+            ."⚽ {$b->game->label()}\n"
+            ."👥 {$b->players} player(s) · 💰 {$b->amountLabel()}\n\n"
+            ."Reply to THIS message with the link, or send: {$b->reference} https://…";
+
+        foreach ($this->messenger->adminContacts() as $admin) {
+            $this->messenger->alertAdmin($admin, $text, ['booking_id' => $b->id, 'kind' => 'link_request']);
+        }
+    }
+
+    /** An admin sent the link: pass it to the client and restart the hold from now. */
+    public function attachLink(Booking $booking, string $url, Contact $admin): string
+    {
+        if ($booking->status !== 'pending_payment') {
+            return "{$booking->reference} is {$booking->status}, link not sent.";
+        }
+        if ($booking->payment_url) {
+            return "{$booking->reference} already got a link from ".($booking->link_sent_by ? '+'.$booking->link_sent_by : 'someone').'. Nothing sent.';
+        }
+
+        // created_at doubles as "hold started": the client gets the full payment window from now.
+        $booking->forceFill(['payment_url' => $url, 'link_sent_by' => $admin->wa_id, 'created_at' => now()])->save();
+        $b = $booking->fresh(['game', 'contact']);
+        $minutes = (int) config('fbl.payment_timeout_minutes', 120);
+
+        $sent = $b->contact && $this->messenger->updateClient($b->contact, $b->reference,
+            "💳 Here's your payment link for booking {$b->reference} ({$b->amountLabel()}):\n{$url}\n\n"
+            ."Your spot is held for {$minutes} minutes. After paying, send the screenshot here ✅");
+
+        foreach ($this->messenger->adminContacts() as $other) {
+            if ($other->wa_id !== $admin->wa_id) {
+                $this->messenger->alertAdmin($other, "{$b->reference}: payment link sent by {$admin->adminName()} ✅");
+            }
+        }
+
+        return $sent
+            ? "✅ Link sent to {$b->player_name} for {$b->reference}. Hold restarted: {$minutes} min."
+            : "⚠️ Couldn't deliver the link to {$b->player_name} (chat closed?). Send it to +".($b->contact->wa_id ?? '?').' yourself.';
     }
 
     /** Ziina says this intent is completed: mark the booking paid (verified) and notify / confirm. */

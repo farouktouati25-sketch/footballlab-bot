@@ -24,6 +24,7 @@ class ZiinaPaymentTest extends TestCase
         parent::setUp();
 
         config([
+            'fbl.payments.mode' => 'ziina',
             'fbl.payments.ziina_token' => 'ziina-test-token',
             'fbl.payments.ziina_webhook_secret' => 'ziina-webhook-secret-123456',
         ]);

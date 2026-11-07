@@ -37,6 +37,10 @@ return [
     // Online payments. With a Ziina API token, every booking gets its own pay link for the exact
     // amount (price × players), and payment is confirmed automatically by Ziina's webhook.
     'payments' => [
+        // admin_link = the bot asks an admin, who replies with a payment link for that booking.
+        // ziina      = the bot creates the exact-amount link itself via the Ziina API (needs ZIINA_API_TOKEN).
+        // fixed      = the game's link / FBL_DEFAULT_PAYMENT_LINK.
+        'mode' => env('FBL_PAYMENT_MODE', 'admin_link'),
         'ziina_token' => env('ZIINA_API_TOKEN', ''),
         'ziina_webhook_secret' => env('ZIINA_WEBHOOK_SECRET', ''),
         'ziina_test_mode' => (bool) env('ZIINA_TEST_MODE', false),

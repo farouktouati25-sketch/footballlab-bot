@@ -20,6 +20,7 @@ final class InboundMessage
         public readonly ?string $mediaMime,
         public readonly bool $forwarded,
         public readonly ?array $referral,
+        public readonly ?string $replyToId,
         public readonly int $timestamp,
         public readonly array $raw,
     ) {}
@@ -94,6 +95,7 @@ final class InboundMessage
             mediaMime: $mediaMime,
             forwarded: (bool) (($message['context']['forwarded'] ?? false) || ($message['context']['frequently_forwarded'] ?? false)),
             referral: isset($message['referral']) && is_array($message['referral']) ? $message['referral'] : null,
+            replyToId: isset($message['context']['id']) ? (string) $message['context']['id'] : null,
             timestamp: (int) ($message['timestamp'] ?? time()),
             raw: $message,
         );

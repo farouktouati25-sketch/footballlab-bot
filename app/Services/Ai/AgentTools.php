@@ -149,11 +149,13 @@ class AgentTools
             'amount' => $booking->amountLabel(),
             'payment_link' => $link,
             'hold_minutes' => (int) config('fbl.payment_timeout_minutes', 120),
-            'instructions' => $link
+            'instructions' => ! $link && config('fbl.payments.mode') === 'admin_link'
+                ? 'The team will send this client a personal payment link here shortly. Tell them that, with the reference and amount, and that once the link arrives they pay and send the screenshot. Do not invent a link.'
+                : ($link
                 ? ($online
                     ? 'Send the amount and this personal payment link. Payment is detected automatically, so no screenshot is needed; the client gets a message here once paid. Spot is held for hold_minutes.'
                     : 'Send the amount and payment link. Ask the client to send the payment screenshot here after paying. Spot is held for hold_minutes.')
-                : 'No payment link is configured: hand off to a human so the team can send payment details.',
+                : 'No payment link is configured: hand off to a human so the team can send payment details.'),
         ];
     }
 

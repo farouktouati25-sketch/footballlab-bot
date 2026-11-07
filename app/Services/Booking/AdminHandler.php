@@ -25,6 +25,7 @@ class AdminHandler
         ."• copy 12 22:30 → second game like #12 at 22:30 (same day), waitlist gets told\n"
         ."• copy 12 2026-11-07 21:00 → same, another day\n"
         ."• pending → bookings waiting for your OK\n"
+        ."• Payment link: reply to my 💳 request with the link (or send FBL-XXXXX https://…)\n"
         ."• confirm FBL-XXXXX / reject FBL-XXXXX\n"
         ."• cancel game 12 → stop bookings for a game\n"
         ."• pause 9715… / resume 9715… → bot off/on for a client\n"
@@ -36,6 +37,7 @@ class AdminHandler
         private readonly ScheduleParser $parser,
         private readonly Messenger $messenger,
         private readonly RosterService $roster,
+        private readonly \App\Services\Payments\PaymentService $payments,
     ) {}
 
     public function handle(Contact $admin, InboundMessage $inbound): void
@@ -55,6 +57,10 @@ class AdminHandler
                 ? '🧪 Test mode ON. You are now a client. Send "#test" to go back to admin mode.'
                 : '🛠 Test mode OFF. Back to admin mode.');
 
+            return;
+        }
+
+        if (! $inbound->forwarded && preg_match('#https?://\S+#i', $text, $urlMatch) && $this->handlePaymentLink($admin, $inbound, $text, $urlMatch[0])) {
             return;
         }
 
@@ -131,6 +137,38 @@ class AdminHandler
             'pending' => $this->listPending($admin),
             default => $this->reply($admin, self::HELP),
         };
+    }
+
+    /** Admin replies with a payment link: to the bot's request (quoted), with the reference, or the only open request. */
+    private function handlePaymentLink(Contact $admin, InboundMessage $inbound, string $text, string $url): bool
+    {
+        $booking = null;
+
+        if ($inbound->replyToId) {
+            $quoted = \App\Models\Message::where('wa_message_id', $inbound->replyToId)->first();
+            $bookingId = $quoted?->payload['booking_id'] ?? null;
+            $booking = $bookingId ? Booking::find($bookingId) : null;
+        }
+        if (! $booking && preg_match('/\bfbl-[a-z0-9]{5}\b/i', $text, $m)) {
+            $booking = Booking::findByReference($m[0]);
+        }
+        if (! $booking) {
+            $waiting = Booking::where('status', 'pending_payment')->whereNotNull('link_requested_at')->whereNull('payment_url')->get();
+            if ($waiting->count() === 1) {
+                $booking = $waiting->first();
+            } elseif ($waiting->count() > 1) {
+                $this->reply($admin, 'Which booking is this link for? Reply to my request message, or send: '
+                    .$waiting->pluck('reference')->implode(' / ').' followed by the link.');
+
+                return true;
+            } else {
+                return false; // not a payment link (e.g. a schedule with a link): handle normally
+            }
+        }
+
+        $this->reply($admin, $this->payments->attachLink($booking, rtrim($url, '.,)'), $admin));
+
+        return true;
     }
 
     private function handleButton(Contact $admin, string $id): void

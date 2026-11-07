@@ -45,7 +45,10 @@ class Game extends Model
             ->when($exceptBookingId, fn ($q) => $q->where('id', '!=', $exceptBookingId))
             ->where(function ($q) use ($cutoff) {
                 $q->whereIn('status', ['confirmed', 'awaiting_approval'])
-                    ->orWhere(fn ($q) => $q->where('status', 'pending_payment')->where('created_at', '>', $cutoff));
+                    ->orWhere(fn ($q) => $q->where('status', 'pending_payment')->where(
+                        // still within the hold, or still waiting for an admin to send the link
+                        fn ($q) => $q->where('created_at', '>', $cutoff)->orWhereNull('payment_url')
+                    ));
             })
             ->sum('players');
     }

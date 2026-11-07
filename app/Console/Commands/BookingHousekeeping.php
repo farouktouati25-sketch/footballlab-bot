@@ -24,12 +24,13 @@ class BookingHousekeeping extends Command
         //    Conditional update: an admin may confirm, or the client report payment, in the meantime.
         Booking::where('status', 'pending_payment')
             ->where('payment_verified', false)
-            ->where('created_at', '<=', $cutoff)
+            ->where(fn ($q) => $q->where(fn ($q) => $q->whereNotNull('payment_url')->where('created_at', '<=', $cutoff))
+                ->orWhere(fn ($q) => $q->whereNull('payment_url')->where('created_at', '<=', now()->subHours(12))))
             ->lazyById(200)
             ->each(function (Booking $booking) use ($messenger, $cutoff) {
                 $expired = Booking::whereKey($booking->id)
                     ->where('status', 'pending_payment')
-                    ->where('created_at', '<=', $cutoff)
+                    ->where('created_at', '<=', $booking->payment_url ? $cutoff : now()->subHours(12))
                     ->update(['status' => 'expired']);
                 if ($expired === 0) {
                     return;
@@ -42,6 +43,18 @@ class BookingHousekeeping extends Command
                         .'Message us anytime if you still want to play ⚽');
                 }
             });
+
+        // 2a) Clients waiting 15+ min for a payment link: one nudge to admins.
+        $noLink = Booking::where('status', 'pending_payment')->whereNull('payment_url')
+            ->whereNotNull('link_requested_at')->whereNull('admin_reminded_at')
+            ->where('link_requested_at', '<=', now()->subMinutes(15))->get();
+        if ($noLink->isNotEmpty()) {
+            foreach ($messenger->adminContacts() as $admin) {
+                $messenger->alertAdmin($admin, "⏳ {$noLink->count()} client(s) still waiting for a payment link: "
+                    .$noLink->pluck('reference')->implode(', ').'. Send: FBL-XXXXX https://…');
+            }
+            Booking::whereIn('id', $noLink->pluck('id'))->update(['admin_reminded_at' => now()]);
+        }
 
         // 2) One reminder for anything waiting on an admin for 30+ minutes.
         $waiting = Booking::where('status', 'awaiting_approval')
