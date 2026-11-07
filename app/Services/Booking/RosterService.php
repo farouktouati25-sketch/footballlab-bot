@@ -24,7 +24,7 @@ class RosterService
             ->orderByRaw('COALESCE(decided_at, created_at)')
             ->orderBy('id')
             ->get()
-            ->flatMap(function (Booking $b) {
+            ->flatMap(function (Booking $b) use ($full) {
                 $name = $full ? trim($b->player_name) : self::publicName($b->player_name);
                 $rows = [$name];
                 for ($i = 1; $i < $b->players; $i++) {
