@@ -54,6 +54,20 @@ class Messenger
         return $this->dispatch($to, $payload, $payload['type'], $caption, 'bot', ['media_id' => $mediaId]);
     }
 
+    /** Send a generated file (CSV etc.) as a document. Only inside the 24h window. */
+    public function file(Contact $to, string $bytes, string $filename, string $mime, ?string $caption = null): bool
+    {
+        if (! $to->windowIsOpen()) {
+            return false;
+        }
+        $mediaId = $this->client->uploadBytes($bytes, $filename, $mime);
+        if (! $mediaId) {
+            return false;
+        }
+
+        return $this->dispatch($to, Payloads::document($to->wa_id, $mediaId, $filename, $caption), 'document', $caption, 'bot', ['file' => $filename]);
+    }
+
     /** Templates work at any time (they must be approved in WhatsApp Manager first). */
     public function template(Contact $to, string $name, array $bodyParams = [], array $quickReplyPayloads = [], array $meta = []): bool
     {

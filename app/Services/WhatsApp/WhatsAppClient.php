@@ -141,6 +141,26 @@ class WhatsAppClient
         }
     }
 
+    /** Upload a file we generated (e.g. a CSV) so it can be sent as a document. Returns the media id. */
+    public function uploadBytes(string $bytes, string $filename, string $mime): ?string
+    {
+        try {
+            $request = $this->http()->timeout(30)->attach('file', $bytes, $filename, ['Content-Type' => $mime]);
+            $response = match (true) {
+                $this->isYCloud() => $request->post('https://api.ycloud.com/v2/whatsapp/media/'.rawurlencode($this->businessNumber).'/upload'),
+                $this->is360() => $request->post($this->path('media'), ['messaging_product' => 'whatsapp', 'type' => $mime]),
+                default => $request->post($this->path($this->phoneNumberId.'/media'), ['messaging_product' => 'whatsapp', 'type' => $mime]),
+            };
+            $response->throw();
+
+            return $response->json('id') ? (string) $response->json('id') : null;
+        } catch (\Throwable $e) {
+            Log::warning('Media upload failed', ['file' => $filename, 'error' => $e->getMessage()]);
+
+            return null;
+        }
+    }
+
     /** YCloud: inbound webhooks carry a short-lived download link; fetch it, then upload to our number. */
     private function reuploadYCloud(?string $link): ?array
     {

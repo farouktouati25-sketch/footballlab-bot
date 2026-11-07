@@ -89,7 +89,13 @@ class BookingAgent
         $venues = implode("\n", array_map(fn ($v) => "- {$v}", $facts['venues']));
         $currency = config('fbl.currency');
         $maxPlayers = (int) config('fbl.max_players_per_booking', 6);
-        $name = $contact->name ? "The client's WhatsApp name is \"{$contact->name}\" (confirm the booking name, don't assume)." : '';
+        $name = $contact->player_name
+            ? "The client told us their name is \"{$contact->player_name}\"."
+            : ($contact->name ? "The client's WhatsApp name is \"{$contact->name}\" (confirm the booking name, don't assume)." : '');
+        if ($contact->preferred_days) {
+            $days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+            $name .= ' Usually free: '.implode(', ', array_map(fn ($d) => $days[(int) $d] ?? '', (array) $contact->preferred_days)).'.';
+        }
         $source = $contact->source === 'meta_ad' ? 'They came from one of our Instagram/Facebook ads.' : '';
         $extra = $facts['extra'] ? "\n- {$facts['extra']}" : '';
         $packs = implode("\n", array_map(
@@ -131,6 +137,7 @@ RULES:
 - WhatsApp style: short lines, at most 5–6 lines, light emoji, no markdown headers or tables.
 - CASH: never offer cash or paying at the pitch. Only if the client says they'll pay on the spot / pay cash, call pay_cash_on_spot and tell them the team will confirm if that's OK.
 - First message to a new client: start with "Welcome to Football Lab ⚽". Don't ask for their level or area.
+- New joiners: once you know their name and the days they usually play, call save_player_profile (e.g. "I'm Farouk, free Sundays" → name Farouk, days [Sunday]). For one specific date ("next Friday") use remember_availability too.
 - If no game is listed for the day they want (or none at all), ask which day they're free and call remember_availability with that date. Then tell them: "Saved ✅ We'll message you here as soon as <day>'s game is posted." Never promise there will be a game.
 - If they reply YES to a reminder about a game, call list_games and continue the booking flow for that game.
 - If the game they want is full, say so and offer the waiting list ("It's full bro, but I can put you on the waiting list 👊"), plus other games if there are any. If they agree, call join_waitlist. No payment for the waiting list. Never promise a place or a second game will open.

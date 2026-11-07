@@ -71,19 +71,35 @@ class RemindersTest extends TestCase
         $game = Game::create(['starts_at' => $friday->copy()->utc(), 'venue' => 'Al Safa', 'price' => 50, 'capacity' => 14, 'status' => 'published']);
         Booking::create(['contact_id' => $booked->id, 'game_id' => $game->id, 'player_name' => 'Sami', 'players' => 1, 'amount' => 50, 'status' => 'confirmed']);
 
+        Contact::create(['wa_id' => '971500000091', 'last_inbound_at' => now()]); // admin
+        // Usually free on Fridays (saved from an earlier chat).
+        $usual = Contact::create(['wa_id' => '971500000004', 'name' => 'Karim', 'last_inbound_at' => now()]);
+        app(ReminderService::class)->saveProfile($usual, 'Karim', ['Friday']);
+
         $service = app(ReminderService::class);
-        $this->assertSame(2, $service->notifyForGame($game));
+        $this->assertSame(3, $service->notifyForGame($game));
+
+        // Nothing goes to players until an admin says so.
+        Http::assertNotSent(fn (Request $r) => in_array($r->data()['to'] ?? null, ['971500000001', '971500000002', '971500000004'], true));
+        Http::assertSent(fn (Request $r) => ($r->data()['to'] ?? null) === '971500000091'
+            && str_contains($r->data()['interactive']['body']['text'] ?? '', 'Remind these players')
+            && str_contains($r->data()['interactive']['body']['text'] ?? '', 'usually free this day'));
+
+        // Admin picks 1 and 2 only (asked + usual day order: Ali, Karim, Omar).
+        $this->assertStringContainsString('Reminded 2', $service->sendApproved($game, [1, 2]));
 
         Http::assertSent(fn (Request $r) => ($r->data()['to'] ?? null) === '971500000001'
             && str_contains($r->data()['text']['body'] ?? '', 'the game is on')
             && str_contains($r->data()['text']['body'] ?? '', 'STOP'));
-        Http::assertSent(fn (Request $r) => ($r->data()['to'] ?? null) === '971500000002'
-            && ($r->data()['template']['name'] ?? null) === 'game_reminder');
+        Http::assertSent(fn (Request $r) => ($r->data()['to'] ?? null) === '971500000004'
+            && str_contains($r->data()['text']['body'] ?? '', 'your day'));
+        Http::assertNotSent(fn (Request $r) => ($r->data()['to'] ?? null) === '971500000002');
         Http::assertNotSent(fn (Request $r) => ($r->data()['to'] ?? null) === '971500000003' && str_contains(json_encode($r->data()), 'game'));
 
         // A second game the same day doesn't message them again.
         $second = Game::create(['starts_at' => $friday->copy()->addHour()->utc(), 'venue' => 'Al Safa', 'price' => 50, 'capacity' => 14, 'status' => 'published']);
         $this->assertSame(0, $service->notifyForGame($second));
+        $this->assertStringContainsString('Nothing waiting', $service->sendApproved($game, null));
     }
 
     public function test_stop_opts_out_of_reminders(): void
@@ -97,6 +113,14 @@ class RemindersTest extends TestCase
         AvailabilityRequest::create(['contact_id' => $contact->id, 'play_date' => $friday->toDateString()]);
         $game = Game::create(['starts_at' => $friday->copy()->utc(), 'venue' => 'Al Safa', 'price' => 50, 'capacity' => 14, 'status' => 'published']);
         $this->assertSame(0, app(ReminderService::class)->notifyForGame($game));
+    }
+
+    public function test_players_sheet_lists_saved_profiles(): void
+    {
+        $c = Contact::create(['wa_id' => '971500000001', 'name' => 'Faro', 'last_inbound_at' => now()]);
+        app(ReminderService::class)->saveProfile($c, 'Farouk', ['Sunday', 'fri']);
+        $csv = app(ReminderService::class)->playersCsv();
+        $this->assertStringContainsString('Farouk,Faro,+971500000001,"Sun Fri"', $csv);
     }
 
     public function test_business_app_greeting_does_not_pause_the_bot(): void

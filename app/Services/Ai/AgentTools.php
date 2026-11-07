@@ -85,6 +85,17 @@ class AgentTools
                 ],
             ],
             [
+                'name' => 'save_player_profile',
+                'description' => 'Save the name the client gives and the weekdays they are usually free to play (e.g. "I\'m Farouk, free Sundays"). Used to invite them when a game on those days is posted. Call it whenever they tell you their name or usual days, even if no game is published.',
+                'input_schema' => [
+                    'type' => 'object',
+                    'properties' => [
+                        'name' => ['type' => 'string'],
+                        'days' => ['type' => 'array', 'items' => ['type' => 'string', 'enum' => ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']]],
+                    ],
+                ],
+            ],
+            [
                 'name' => 'my_bookings',
                 'description' => "This client's bookings for upcoming games with status.",
                 'input_schema' => ['type' => 'object', 'properties' => new \stdClass],
@@ -118,6 +129,7 @@ class AgentTools
             'report_payment' => $this->reportPayment($contact, $input),
             'pay_cash_on_spot' => $this->payCash($contact, $input),
             'my_bookings' => $this->myBookings($contact),
+            'save_player_profile' => $this->reminders->saveProfile($contact, isset($input['name']) ? (string) $input['name'] : null, (array) ($input['days'] ?? [])),
             'remember_availability' => $this->reminders->remember($contact, (string) ($input['date'] ?? ''), (int) ($input['players'] ?? 1)),
             'join_waitlist' => $this->joinWaitlist($contact, $input),
             'cancel_booking' => $this->cancelBooking($contact, $input),
