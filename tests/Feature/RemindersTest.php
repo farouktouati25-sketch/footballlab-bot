@@ -54,52 +54,51 @@ class RemindersTest extends TestCase
         Http::assertSent(fn (Request $r) => str_contains($r->data()['text']['body'] ?? '', 'Saved ✅'));
     }
 
-    public function test_publishing_reminds_people_who_asked_and_last_weeks_players_once(): void
+    public function test_publishing_gives_admins_an_invite_list_and_bot_takes_over_after_admin_texts(): void
     {
         $friday = $this->nextFriday();
+        Contact::create(['wa_id' => '971500000091', 'last_inbound_at' => now()]); // admin
+
         $asker = Contact::create(['wa_id' => '971500000001', 'name' => 'Ali Hassan', 'last_inbound_at' => now()]);
         AvailabilityRequest::create(['contact_id' => $asker->id, 'play_date' => $friday->toDateString()]);
 
-        // Played last Friday; chat window closed → template.
-        $regular = Contact::create(['wa_id' => '971500000002', 'name' => 'Omar', 'last_inbound_at' => now()->subDays(6)]);
-        $old = Game::create(['starts_at' => $friday->copy()->subWeek()->utc(), 'venue' => 'Al Safa', 'price' => 50, 'capacity' => 14, 'status' => 'published']);
-        Booking::create(['contact_id' => $regular->id, 'game_id' => $old->id, 'player_name' => 'Omar', 'players' => 1, 'amount' => 50, 'status' => 'confirmed']);
-
-        // Already booked for this Friday: no reminder.
-        $booked = Contact::create(['wa_id' => '971500000003', 'name' => 'Sami', 'last_inbound_at' => now()]);
-        Booking::create(['contact_id' => $booked->id, 'game_id' => $old->id, 'player_name' => 'Sami', 'players' => 1, 'amount' => 50, 'status' => 'confirmed']);
-        $game = Game::create(['starts_at' => $friday->copy()->utc(), 'venue' => 'Al Safa', 'price' => 50, 'capacity' => 14, 'status' => 'published']);
-        Booking::create(['contact_id' => $booked->id, 'game_id' => $game->id, 'player_name' => 'Sami', 'players' => 1, 'amount' => 50, 'status' => 'confirmed']);
-
-        Contact::create(['wa_id' => '971500000091', 'last_inbound_at' => now()]); // admin
-        // Usually free on Fridays (saved from an earlier chat).
-        $usual = Contact::create(['wa_id' => '971500000004', 'name' => 'Karim', 'last_inbound_at' => now()]);
+        $usual = Contact::create(['wa_id' => '971500000004', 'name' => 'K', 'last_inbound_at' => now()]);
         app(ReminderService::class)->saveProfile($usual, 'Karim', ['Friday']);
 
-        $service = app(ReminderService::class);
-        $this->assertSame(3, $service->notifyForGame($game));
+        // Played 5 days ago, nothing since → lapsed.
+        $lapsed = Contact::create(['wa_id' => '971500000002', 'name' => 'Omar']);
+        $old = Game::create(['starts_at' => now()->subDays(5), 'venue' => 'Al Safa', 'price' => 50, 'capacity' => 14, 'status' => 'published']);
+        Booking::create(['contact_id' => $lapsed->id, 'game_id' => $old->id, 'player_name' => 'Omar', 'players' => 1, 'amount' => 50, 'status' => 'confirmed']);
 
-        // Nothing goes to players until an admin says so.
-        Http::assertNotSent(fn (Request $r) => in_array($r->data()['to'] ?? null, ['971500000001', '971500000002', '971500000004'], true));
+        // Played yesterday → too recent, not listed.
+        $recent = Contact::create(['wa_id' => '971500000003', 'name' => 'Sami']);
+        $y = Game::create(['starts_at' => now()->subDay(), 'venue' => 'Al Safa', 'price' => 50, 'capacity' => 14, 'status' => 'published']);
+        Booking::create(['contact_id' => $recent->id, 'game_id' => $y->id, 'player_name' => 'Sami', 'players' => 1, 'amount' => 50, 'status' => 'confirmed']);
+
+        $game = Game::create(['starts_at' => $friday->copy()->utc(), 'venue' => 'Al Safa', 'price' => 50, 'capacity' => 14, 'status' => 'published']);
+        $this->assertSame(3, app(ReminderService::class)->notifyForGame($game));
+
+        // The bot never messages players itself.
+        Http::assertNotSent(fn (Request $r) => in_array($r->data()['to'] ?? null, ['971500000001', '971500000002', '971500000003', '971500000004'], true));
         Http::assertSent(fn (Request $r) => ($r->data()['to'] ?? null) === '971500000091'
-            && str_contains($r->data()['interactive']['body']['text'] ?? '', 'Remind these players')
-            && str_contains($r->data()['interactive']['body']['text'] ?? '', 'usually free this day'));
+            && str_contains($r->data()['text']['body'] ?? '', "1. Ali Hassan")
+            && str_contains($r->data()['text']['body'] ?? '', "2. Karim")
+            && str_contains($r->data()['text']['body'] ?? '', "3. Omar")
+            && ! str_contains($r->data()['text']['body'] ?? '', 'Sami'));
+        Http::assertSent(fn (Request $r) => ($r->data()['to'] ?? null) === '971500000091'
+            && str_contains($r->data()['text']['body'] ?? '', 'You in? 👊'));
 
-        // Admin picks 1 and 2 only (asked + usual day order: Ali, Karim, Omar).
-        $this->assertStringContainsString('Reminded 2', $service->sendApproved($game, [1, 2]));
+        // Admin texts Omar from the phone: the bot is NOT paused, so it answers Omar's reply.
+        $this->echo('971500000002', 'Hey bro ⚽ Friday game is on!');
+        $this->assertFalse($lapsed->fresh()->botIsPaused());
 
-        Http::assertSent(fn (Request $r) => ($r->data()['to'] ?? null) === '971500000001'
-            && str_contains($r->data()['text']['body'] ?? '', 'the game is on')
-            && str_contains($r->data()['text']['body'] ?? '', 'STOP'));
-        Http::assertSent(fn (Request $r) => ($r->data()['to'] ?? null) === '971500000004'
-            && str_contains($r->data()['text']['body'] ?? '', 'your day'));
-        Http::assertNotSent(fn (Request $r) => ($r->data()['to'] ?? null) === '971500000002');
-        Http::assertNotSent(fn (Request $r) => ($r->data()['to'] ?? null) === '971500000003' && str_contains(json_encode($r->data()), 'game'));
+        // A second message from the phone to Omar = the team really talking → pause.
+        $this->echo('971500000002', 'Call me when you can');
+        $this->assertTrue($lapsed->fresh()->botIsPaused());
 
-        // A second game the same day doesn't message them again.
+        // Same day again doesn't list them twice.
         $second = Game::create(['starts_at' => $friday->copy()->addHour()->utc(), 'venue' => 'Al Safa', 'price' => 50, 'capacity' => 14, 'status' => 'published']);
-        $this->assertSame(0, $service->notifyForGame($second));
-        $this->assertStringContainsString('Nothing waiting', $service->sendApproved($game, null));
+        $this->assertSame(0, app(ReminderService::class)->notifyForGame($second));
     }
 
     public function test_stop_opts_out_of_reminders(): void

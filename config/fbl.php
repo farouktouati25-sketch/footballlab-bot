@@ -71,6 +71,7 @@ return [
     // Message people who asked for a day / played that weekday last week when its game is published.
     'reminders' => [
         'enabled' => (bool) env('FBL_REMINDERS', true),
+        'lookback_days' => (int) env('FBL_REMINDER_LOOKBACK_DAYS', 60),
     ],
 
     // Text(s) of the WhatsApp Business app greeting/away message, separated by "||". Echoes that start

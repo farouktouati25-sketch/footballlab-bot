@@ -52,19 +52,20 @@ class ReminderService
     }
 
     /**
-     * Called right after a game is published. Nothing is sent yet: the people to remind are listed
-     * for the admins, who tap "Send" (or pick some). Returns how many people are waiting for that OK.
+     * Called right after a game is published. The bot sends nothing to players: it gives the admins
+     * a list (people who asked for that day, usually play that day, or played 3+ days ago and haven't
+     * been back) plus a ready-to-send invite. The admin messages them from the phone; when they
+     * reply, the bot takes over. Returns how many people are on the list.
      */
     public function notifyForGame(Game $game): int
     {
         if (! config('fbl.reminders.enabled', true)) {
             return 0;
         }
-        $tz = config('fbl.timezone');
         $local = $game->localStart();
         $day = $local->toDateString();
 
-        $recipients = []; // contact_id => reason (first reason wins: asked > usual_day > last_week)
+        $recipients = []; // contact_id => reason (first wins: asked > usual_day > same_day > lapsed)
         AvailabilityRequest::where('play_date', $day)->whereNull('notified_at')->pluck('contact_id')
             ->each(function ($id) use (&$recipients) { $recipients[$id] ??= 'asked'; });
 
@@ -72,115 +73,118 @@ class ReminderService
             ->filter(fn (Contact $c) => in_array($local->dayOfWeek, array_map('intval', (array) $c->preferred_days), true))
             ->each(function (Contact $c) use (&$recipients) { $recipients[$c->id] ??= 'usual_day'; });
 
-        // Played the same weekday last week (bot bookings only: those are the numbers we have).
-        $lastWeek = $local->copy()->subWeek();
-        Booking::where('status', 'confirmed')->whereNotNull('contact_id')
-            ->whereHas('game', fn ($q) => $q->whereBetween('starts_at', [$lastWeek->copy()->startOfDay()->utc(), $lastWeek->copy()->endOfDay()->utc()])
-                ->where('status', '!=', 'cancelled'))
-            ->pluck('contact_id')->unique()
-            ->each(function ($id) use (&$recipients) { $recipients[$id] ??= 'last_week'; });
+        // Players whose last game was 3–60 days ago and who have nothing booked since.
+        $lookback = (int) config('fbl.reminders.lookback_days', 60);
+        $lastGame = Booking::where('bookings.status', 'confirmed')->whereNotNull('contact_id')
+            ->join('games', 'games.id', '=', 'bookings.game_id')
+            ->where('games.status', '!=', 'cancelled')
+            ->where('games.starts_at', '>', now()->subDays($lookback))
+            ->groupBy('contact_id')
+            ->selectRaw('contact_id, MAX(games.starts_at) as last_at')
+            ->get();
+        $active = Booking::whereIn('status', ['pending_payment', 'awaiting_approval', 'confirmed'])->whereNotNull('contact_id')
+            ->whereHas('game', fn ($q) => $q->where('starts_at', '>', now()))->pluck('contact_id')->all();
+        foreach ($lastGame as $row) {
+            $last = Carbon::parse($row->last_at, 'UTC');
+            if ($last->gt(now()->subDays(3)) || in_array($row->contact_id, $active, true)) {
+                continue;
+            }
+            $recipients[$row->contact_id] ??= $last->copy()->setTimezone(config('fbl.timezone'))->dayOfWeek === $local->dayOfWeek ? 'same_day' : 'lapsed';
+        }
 
         if (! $recipients) {
             return 0;
         }
 
         $busy = $this->busyOn($day);
-        $queued = 0;
+        $listed = 0;
         $contacts = Contact::whereIn('id', array_keys($recipients))->whereNull('reminders_opted_out_at')->get();
         foreach ($contacts as $contact) {
             if ($contact->isAdmin() || in_array($contact->id, $busy, true)) {
                 continue;
             }
-            // One reminder per person per day, even if two games publish at once.
             try {
                 DB::table('game_reminders')->insert([
                     'contact_id' => $contact->id, 'game_id' => $game->id, 'play_date' => $day,
-                    'reason' => $recipients[$contact->id], 'status' => 'pending', 'sent' => false,
+                    'reason' => $recipients[$contact->id], 'status' => 'manual', 'sent' => false,
                     'created_at' => now(), 'updated_at' => now(),
                 ]);
-                $queued++;
+                $listed++;
             } catch (QueryException) {
-                continue;
+                continue; // already on a list for that day
             }
+            AvailabilityRequest::where('contact_id', $contact->id)->where('play_date', $day)->update(['notified_at' => now()]);
         }
 
-        if ($queued > 0) {
-            $this->askAdmins($game);
+        if ($listed > 0) {
+            $this->sendInviteList($game);
         }
 
-        return $queued;
+        return $listed;
     }
 
-    /** The numbered list admins choose from. */
-    public function pendingFor(Game $game): \Illuminate\Support\Collection
+    /** The list + a message the admin can copy and send from the phone. */
+    public function sendInviteList(Game $game, ?Contact $only = null): bool
     {
-        $rank = ['asked' => 0, 'usual_day' => 1, 'last_week' => 2];
+        $rows = DB::table('game_reminders')->where('game_id', $game->id)->whereIn('status', ['manual', 'sent'])->get();
+        $rank = ['asked' => 0, 'usual_day' => 1, 'same_day' => 2, 'lapsed' => 3];
+        $rows = $rows->sortBy(fn ($r) => [$rank[$r->reason] ?? 9, $r->id])->values();
+        if ($rows->isEmpty()) {
+            if ($only) {
+                $this->messenger->alertAdmin($only, "Nobody to invite for #{$game->id} right now.");
+            }
 
-        return DB::table('game_reminders')->where('game_id', $game->id)->where('status', 'pending')->orderBy('id')->get()
-            ->sortBy(fn ($r) => [$rank[$r->reason] ?? 9, $r->id])->values()
-            ->map(fn ($r) => (object) ['row' => $r, 'contact' => Contact::find($r->contact_id)])
-            ->filter(fn ($r) => $r->contact)->values();
-    }
-
-    public function askAdmins(Game $game): void
-    {
-        $pending = $this->pendingFor($game);
-        if ($pending->isEmpty()) {
-            return;
+            return false;
         }
-        $why = ['asked' => 'asked for this day', 'usual_day' => 'usually free this day', 'last_week' => 'played last week'];
-        $lines = $pending->map(fn ($r, $i) => ($i + 1).'. '.($r->contact->player_name ?: $r->contact->name ?: 'Player')
-            .' · +'.$r->contact->wa_id.' · '.($why[$r->row->reason] ?? $r->row->reason))->implode("\n");
-        $text = "📣 Remind these players about #{$game->id} ({$game->label()})?\n\n{$lines}\n\n"
-            ."Send to all, or pick: remind {$game->id} 1,3,5";
 
-        foreach ($this->messenger->adminContacts() as $admin) {
-            $admin->windowIsOpen()
-                ? $this->messenger->buttons($admin, mb_substr($text, 0, 1024), ['rem_all:'.$game->id => '📩 Send to all', 'rem_skip:'.$game->id => '⏭ Don\'t send'])
-                : $this->messenger->alertAdmin($admin, $text.' (or: remind '.$game->id.' all / remind '.$game->id.' skip)');
+        $why = ['asked' => 'asked for this day', 'usual_day' => 'usually free this day', 'same_day' => 'played this weekday before', 'lapsed' => 'hasn\'t played lately'];
+        $lines = $rows->map(function ($r, $i) use ($why) {
+            $c = Contact::find($r->contact_id);
+
+            return ($i + 1).'. '.($c?->player_name ?: $c?->name ?: 'Player').' · +'.($c?->wa_id ?? '?').' · '.($why[$r->reason] ?? $r->reason)
+                .($r->status === 'sent' ? ' ✅ messaged' : '');
+        })->implode("\n");
+
+        $invite = "Hey bro ⚽ {$game->localStart()->format('l')} game is on!\n"
+            ."📅 {$game->label()}\n💰 ".(float) $game->price.' '.config('fbl.currency')." · {$game->spotsLeft()} spots left\n"
+            .'You in? 👊';
+
+        $ok = false;
+        foreach ($only ? [$only] : $this->messenger->adminContacts() as $admin) {
+            $ok = $this->messenger->alertAdmin($admin,
+                "📣 Players to invite for #{$game->id} ({$game->label()}):\n\n{$lines}\n\n"
+                ."Message them from the phone. When they reply, I take over the chat and book them.") || $ok;
+            $this->messenger->alertAdmin($admin, $invite);
         }
+
+        return $ok;
     }
 
     /**
-     * Admin decision. $pick = null → everyone pending; [] → skip all; [1,3] → those list numbers.
-     * Returns a one-line summary for the admin.
+     * The admin messaged someone from the invite list from the phone: that's an invite, not the team
+     * taking over, so the bot keeps answering. Marks them as messaged.
      */
-    public function sendApproved(Game $game, ?array $pick): string
+    public function isInviteEcho(Contact $contact): bool
     {
-        $pending = $this->pendingFor($game);
-        if ($pending->isEmpty()) {
-            return 'Nothing waiting to send for #'.$game->id.' (already handled).';
+        $row = DB::table('game_reminders')
+            ->join('games', 'games.id', '=', 'game_reminders.game_id')
+            ->where('game_reminders.contact_id', $contact->id)
+            ->whereIn('game_reminders.status', ['manual', 'sent'])
+            ->where('games.starts_at', '>', now())
+            ->where('game_reminders.created_at', '>', now()->subDays(7))
+            ->select('game_reminders.id', 'game_reminders.status')
+            ->first();
+        if (! $row) {
+            return false;
         }
-        if ($pick === []) {
-            DB::table('game_reminders')->where('game_id', $game->id)->where('status', 'pending')->update(['status' => 'skipped', 'updated_at' => now()]);
+        if ($row->status === 'manual') {
+            DB::table('game_reminders')->where('id', $row->id)->update(['status' => 'sent', 'sent' => true, 'updated_at' => now()]);
 
-            return '⏭ No reminders sent for #'.$game->id.'.';
-        }
-
-        $busy = $this->busyOn($pending->first()->row->play_date);
-        $sent = 0;
-        $failed = [];
-        foreach ($pending as $i => $r) {
-            if ($pick !== null && ! in_array($i + 1, $pick, true)) {
-                continue;
-            }
-            // Claim the row so a second admin tapping at the same time can't double-send.
-            $claimed = DB::table('game_reminders')->where('id', $r->row->id)->where('status', 'pending')->update(['status' => 'sending']);
-            if (! $claimed) {
-                continue;
-            }
-            $ok = ! in_array($r->contact->id, $busy, true) && ! $r->contact->reminders_opted_out_at
-                && $this->send($r->contact, $game, $r->row->reason);
-            DB::table('game_reminders')->where('id', $r->row->id)->update(['status' => $ok ? 'sent' : 'failed', 'sent' => $ok, 'updated_at' => now()]);
-            AvailabilityRequest::where('contact_id', $r->contact->id)->where('play_date', $r->row->play_date)->update(['notified_at' => now()]);
-            $ok ? $sent++ : $failed[] = ($r->contact->player_name ?: $r->contact->name ?: '+'.$r->contact->wa_id);
-        }
-        if ($pick !== null) {
-            DB::table('game_reminders')->where('game_id', $game->id)->where('status', 'pending')->update(['status' => 'skipped', 'updated_at' => now()]);
+            return true;
         }
 
-        return "📩 Reminded {$sent} player(s) about #{$game->id}."
-            .($failed ? ' Not delivered: '.implode(', ', $failed).' (chat closed and the game_reminder template not approved yet, or already booked).' : '');
+        // Already messaged once: a second message from the phone is the team really talking.
+        return false;
     }
 
     /** Contacts already in, holding, or waiting on a game that day. */
@@ -257,31 +261,6 @@ class ReminderService
         rewind($out);
 
         return (string) stream_get_contents($out);
-    }
-
-    private function send(Contact $contact, Game $game, string $reason): bool
-    {
-        $name = ($contact->player_name ?: $contact->name) ? strtok(trim($contact->player_name ?: $contact->name), ' ') : 'bro';
-        $price = (float) $game->price.' '.config('fbl.currency');
-        $spots = $game->spotsLeft();
-
-        if ($contact->windowIsOpen()) {
-            $dayName = $game->localStart()->format('l');
-            $intro = match ($reason) {
-                'asked' => "Hey {$name} ⚽ You asked about {$dayName}: the game is on!",
-                'usual_day' => "Hey {$name} ⚽ {$dayName} game is on, you said that's your day 👊",
-                default => "Hey {$name} ⚽ You played with us last {$dayName}. This week's game is on!",
-            };
-
-            return $this->messenger->text($contact,
-                "{$intro}\n📅 {$game->label()}\n💰 {$price} · {$spots} spot(s) left\n\n"
-                ."Want a spot? Reply YES and how many players.\nReply STOP for no more reminders.",
-                'bot', ['kind' => 'game_reminder', 'game_id' => $game->id]);
-        }
-
-        // Outside the 24h window only an approved template can go out (Marketing category, paid per message).
-        return $this->messenger->template($contact, (string) config('whatsapp.templates.game_reminder'),
-            [$name, $game->label(), $price], [], ['kind' => 'game_reminder', 'game_id' => $game->id]);
     }
 
     /** "STOP" / "START" from a client. Returns the reply to send, or null if it isn't one of those. */

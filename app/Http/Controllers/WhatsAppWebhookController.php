@@ -122,7 +122,9 @@ class WhatsAppWebhookController extends Controller
         $contact = Contact::firstOrCreate(['wa_id' => $to]);
         $type = (string) ($echo['type'] ?? 'text');
         $body = $echo['text']['body'] ?? null;
-        $automatic = $this->isAutoReply($contact, $body);
+        // The admin's invite from the list (checked first: the same copied text goes to many people).
+        $invite = app(\App\Services\Booking\ReminderService::class)->isInviteEcho($contact);
+        $automatic = ! $invite && $this->isAutoReply($contact, $body);
 
         Message::create([
             'contact_id' => $contact->id,
@@ -131,11 +133,12 @@ class WhatsAppWebhookController extends Controller
             'type' => $type,
             'body' => $body ?? '['.$type.' sent by team]',
             'wa_message_id' => $id ?: null,
-            'payload' => ['echo' => true, 'auto' => $automatic],
+            'payload' => ['echo' => true, 'auto' => $automatic, 'invite' => $invite],
         ]);
 
-        if ($automatic) {
-            return; // the Business app's greeting/away message: the bot still answers right after it
+        if ($automatic || $invite) {
+            // Greeting/away message, or the admin's first invite from the list: the bot answers their reply.
+            return;
         }
 
         // The team took over this chat: keep the bot quiet for a while.

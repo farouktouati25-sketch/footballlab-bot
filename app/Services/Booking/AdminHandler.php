@@ -16,7 +16,7 @@ use Illuminate\Support\Str;
 class AdminHandler
 {
     public const HELP = "FootballLab bot · admin commands\n"
-        ."• After you publish, I list who to remind (asked for that day / usual day / played last week). Tap Send, or: remind N 1,3,5 / remind N skip\n"
+        ."• After you publish, I send who to invite (asked for that day / usual day / no game in 3+ days) + a message to copy. You text them from the phone; I take over when they reply. Again anytime: invite N\n"
         ."• players → the player sheet (CSV for Excel)\n"
         ."• Spot frees up in a full game → I ask you to offer it to the next on the waiting list (or: offer N / skip N)\n"
         ."• Forward your group post (or start with #games) → I read the games + names, you tap Publish. Forward an updated list anytime to sync names.\n"
@@ -82,14 +82,9 @@ class AdminHandler
             return;
         }
 
-        if (preg_match('/^remind\s+(\d+)\s+(all|skip|none|[\d,\s]+)$/i', $text, $m)) {
-            $arg = mb_strtolower(trim($m[2]));
-            $pick = match ($arg) {
-                'all' => null,
-                'skip', 'none' => [],
-                default => array_values(array_filter(array_map('intval', preg_split('/[,\s]+/', $arg)))),
-            };
-            $this->remindersAnswer($admin, (int) $m[1], $pick);
+        if (preg_match('/^invite\s+(\d+)$/i', $text, $m)) {
+            $game = Game::find((int) $m[1]);
+            $game ? app(\App\Services\Booking\ReminderService::class)->sendInviteList($game, $admin) : $this->reply($admin, "No game #{$m[1]}.");
 
             return;
         }
@@ -214,29 +209,10 @@ class AdminHandler
             'reject' => $this->decide($admin, (int) $ref, false),
             'publish' => $this->publishBatch($admin, $ref, true),
             'discard' => $this->publishBatch($admin, $ref, false),
-            'rem_all' => $this->remindersAnswer($admin, (int) $ref, null),
-            'rem_skip' => $this->remindersAnswer($admin, (int) $ref, []),
             'wl_send' => $this->waitlistAnswer($admin, (int) $ref, true),
             'wl_skip' => $this->waitlistAnswer($admin, (int) $ref, false),
             default => $this->reply($admin, self::HELP),
         };
-    }
-
-    private function remindersAnswer(Contact $admin, int $gameId, ?array $pick): void
-    {
-        $game = Game::find($gameId);
-        if (! $game) {
-            $this->reply($admin, "No game #{$gameId}.");
-
-            return;
-        }
-        $summary = app(\App\Services\Booking\ReminderService::class)->sendApproved($game, $pick);
-        $this->reply($admin, $summary);
-        foreach ($this->messenger->adminContacts() as $other) {
-            if ($other->wa_id !== $admin->wa_id) {
-                $this->messenger->alertAdmin($other, $summary.' ('.$admin->adminName().')');
-            }
-        }
     }
 
     private function waitlistAnswer(Contact $admin, int $entryId, bool $send): void
@@ -383,7 +359,7 @@ class AdminHandler
         $reminded = $games->sum(fn (Game $g) => app(\App\Services\Booking\ReminderService::class)->notifyForGame($g->fresh()));
         $this->reply($admin, "✅ {$count} game(s) published. The bot is taking bookings."
             .($notified ? " Told {$notified} waitlisted player(s)." : '')
-            .($reminded ? " {$reminded} player(s) to remind: check the list I'm sending." : ''));
+            .($reminded ? " {$reminded} player(s) to invite: list below 👇" : ''));
     }
 
     private function addPlayer(Contact $admin, int $gameId, string $name, int $players): void
