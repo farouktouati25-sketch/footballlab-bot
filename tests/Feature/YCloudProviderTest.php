@@ -63,6 +63,7 @@ class YCloudProviderTest extends TestCase
         $this->assertSame('Joe', $contact->name);
         $this->assertSame('meta_ad', $contact->source);
 
+        fwrite(STDERR, "\nRECORDED: ".json_encode(Http::recorded()->map(fn ($p) => [$p[0]->url(), $p[0]->data(), $p[0]->header('X-API-Key')])->all(), JSON_UNESCAPED_SLASHES)."\n");
         Http::assertSent(fn (Request $r) => str_contains($r->url(), 'api.ycloud.com/v2/whatsapp/messages/sendDirectly')
             && $r->header('X-API-Key')[0] === 'ycloud-key'
             && $r->data()['from'] === '+971503741554'
