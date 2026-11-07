@@ -10,7 +10,7 @@ class ScheduleParser
     public function __construct(private readonly ClaudeClient $claude) {}
 
     /**
-     * @return array<int, array{starts_at:Carbon, venue:string, format:?string, price:float, capacity:int, payment_link:?string, notes:?string}>
+     * @return array<int, array{starts_at:Carbon, venue:string, format:?string, price:float, capacity:int, payment_link:?string, notes:?string, players:string[]}>
      */
     public function parse(string $post): array
     {
@@ -24,7 +24,9 @@ class ScheduleParser
 You extract football games from a WhatsApp group announcement for FootballLab DXB.
 Today in Dubai is {$today}. Resolve weekday names to the NEXT occurrence (today counts if the time is still ahead).
 Known venues (use these exact names when the post clearly refers to one): {$venues}.
-If price is missing use {$defaultPrice}. If the number of spots/players is missing use {$defaultCapacity}.
+If price is missing use {$defaultPrice}.
+Capacity: if the post has a numbered player list, capacity = the number of numbered slots in the MAIN list (filled or empty), not counting the waiting list. Otherwise use the number of spots/players stated, or {$defaultCapacity}.
+players: the names already filled in the main list, in order, exactly as written (not the waiting list).
 Times are Dubai local, 24h HH:MM. One entry per game. Ignore anything that is not a game.
 Always answer by calling the save_games tool exactly once (with an empty list if there are no games). Never answer in plain text.
 PROMPT;
@@ -48,6 +50,11 @@ PROMPT;
                                 'capacity' => ['type' => 'integer'],
                                 'payment_link' => ['type' => ['string', 'null']],
                                 'notes' => ['type' => ['string', 'null']],
+                                'players' => [
+                                    'type' => 'array',
+                                    'items' => ['type' => 'string'],
+                                    'description' => 'Names already written in the main numbered player list, in order, exactly as written. Exclude the waiting list and empty slots.',
+                                ],
                             ],
                             'required' => ['date', 'start_time', 'venue', 'price', 'capacity'],
                         ],
@@ -87,6 +94,10 @@ PROMPT;
                 'capacity' => max(1, min(100, (int) ($g['capacity'] ?? $defaultCapacity))),
                 'payment_link' => $link,
                 'notes' => isset($g['notes']) ? mb_substr((string) $g['notes'], 0, 250) : null,
+                'players' => array_values(array_filter(array_map(
+                    fn ($n) => mb_substr(trim((string) $n), 0, 120),
+                    is_array($g['players'] ?? null) ? $g['players'] : []
+                ), fn ($n) => $n !== '')),
             ];
         }
 

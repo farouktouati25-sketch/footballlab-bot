@@ -17,7 +17,7 @@ class RosterService
     public function __construct(private readonly Messenger $messenger) {}
 
     /** One line per player in booking order; a booking for 3 shows "Ali", "Ali +1", "Ali +2". */
-    public function names(Game $game): Collection
+    public function names(Game $game, bool $full = false): Collection
     {
         return $game->bookings()
             ->where('status', 'confirmed')
@@ -25,7 +25,7 @@ class RosterService
             ->orderBy('id')
             ->get()
             ->flatMap(function (Booking $b) {
-                $name = self::publicName($b->player_name);
+                $name = $full ? trim($b->player_name) : self::publicName($b->player_name);
                 $rows = [$name];
                 for ($i = 1; $i < $b->players; $i++) {
                     $rows[] = "{$name} +{$i}";
@@ -39,6 +39,10 @@ class RosterService
     /** Text to paste in the group, in the usual numbered-list style. */
     public function groupText(Game $game): string
     {
+        if ($game->source_text && ($filled = $this->fillTemplate($game)) !== null) {
+            return $filled;
+        }
+
         $names = $this->names($game);
         $lines = [];
         for ($i = 0; $i < $game->capacity; $i++) {
@@ -60,6 +64,78 @@ class RosterService
             : "\n\nFULL ✅ · waitlist: https://wa.me/".config('fbl.bot_number');
 
         return $header."\n\n".implode("\n", $lines).$footer;
+    }
+
+    /**
+     * Re-use the admin's own group post: same header, emojis and footer, only the numbered
+     * player slots (and empty waiting-list slots) are filled. Null if the post has no numbered list.
+     */
+    public function fillTemplate(Game $game): ?string
+    {
+        $lines = preg_split('/\r\n|\n|\r/', (string) $game->source_text);
+        $slot = '/^(\s*)(\d{1,2})(\s*[.)\-]\s*)(.*)$/u';
+
+        // The main list: the first run of lines numbered 1, 2, 3… before any "waiting" heading.
+        $main = [];
+        $waitingAt = null;
+        foreach ($lines as $i => $line) {
+            if (preg_match('/wait/iu', $line)) {
+                $waitingAt = $i;
+                break;
+            }
+            if (preg_match($slot, $line, $m) && (int) $m[2] === count($main) + 1) {
+                $main[] = $i;
+            } elseif (preg_match($slot, $line) && $main === []) {
+                continue;
+            }
+        }
+        if (count($main) < 2) {
+            return null;
+        }
+
+        $names = $this->names($game, full: true)->all();
+        $render = function (string $line, ?string $name) use ($slot) {
+            preg_match($slot, $line, $m);
+
+            return $name === null || $name === '' ? rtrim($m[1].$m[2].$m[3]) : $m[1].$m[2].$m[3].$name;
+        };
+
+        foreach ($main as $k => $i) {
+            $lines[$i] = $render($lines[$i], $names[$k] ?? null);
+        }
+        // More players than slots (admin added extra by hand): continue the numbering.
+        $extra = [];
+        for ($k = count($main); $k < count($names); $k++) {
+            preg_match($slot, $lines[end($main)], $m);
+            $extra[] = $m[1].($k + 1).$m[3].$names[$k];
+        }
+        if ($extra) {
+            array_splice($lines, end($main) + 1, 0, $extra);
+            if ($waitingAt !== null) {
+                $waitingAt += count($extra);
+            }
+        }
+
+        // Waiting list: fill its empty numbered slots with people waiting through the bot.
+        if ($waitingAt !== null) {
+            $waiting = $game->waitlist()->with('contact')->orderBy('id')->get()
+                ->map(fn ($w) => trim(($w->contact?->name ?: 'Player').($w->players > 1 ? ' +'.($w->players - 1) : '')))
+                ->values()->all();
+            $w = 0;
+            for ($i = $waitingAt + 1; $i < count($lines) && $w < count($waiting); $i++) {
+                if (! preg_match($slot, $lines[$i], $m)) {
+                    if (trim($lines[$i]) === '') {
+                        continue;
+                    }
+                    break;
+                }
+                if (trim($m[4]) === '') {
+                    $lines[$i] = $m[1].$m[2].$m[3].$waiting[$w++];
+                }
+            }
+        }
+
+        return implode("\n", $lines);
     }
 
     /** After a change, give admins the updated list to paste (only where the 24h window is open). */

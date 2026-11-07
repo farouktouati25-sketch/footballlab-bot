@@ -172,6 +172,72 @@ class BookingService
         });
     }
 
+    /**
+     * Make the game's confirmed list match the names in the admin's group post.
+     * Adds names that aren't on the list yet; cancels earlier post-imported names the post no longer has.
+     * Bot bookings are never cancelled by this. Returns [added, removed].
+     *
+     * @param  string[]  $names  rows as written in the post ("Ali", "Ali +1", ...)
+     */
+    public function syncPostPlayers(Game $game, array $names, Contact $admin): array
+    {
+        return DB::transaction(function () use ($game, $names, $admin) {
+            $norm = fn (string $n) => mb_strtolower(preg_replace('/\s+/u', ' ', trim($n)));
+
+            // Current rows, expanded the same way the list shows them ("Ali", "Ali +1").
+            $current = [];
+            foreach ($game->bookings()->where('status', 'confirmed')->orderBy('id')->get() as $b) {
+                $current[] = ['key' => $norm($b->player_name), 'booking' => $b];
+                for ($i = 1; $i < $b->players; $i++) {
+                    $current[] = ['key' => $norm($b->player_name.' +'.$i), 'booking' => $b];
+                }
+            }
+
+            $wanted = array_map($norm, $names);
+            $remainingCurrent = $current;
+            $added = 0;
+
+            foreach ($names as $i => $name) {
+                $key = $wanted[$i];
+                $match = null;
+                foreach ($remainingCurrent as $idx => $row) {
+                    if ($row['key'] === $key) {
+                        $match = $idx;
+                        break;
+                    }
+                }
+                if ($match !== null) {
+                    unset($remainingCurrent[$match]);
+
+                    continue;
+                }
+                Booking::create([
+                    'contact_id' => null,
+                    'source' => 'post',
+                    'game_id' => $game->id,
+                    'player_name' => mb_substr(trim($name), 0, 120),
+                    'players' => 1,
+                    'amount' => (float) $game->price,
+                    'status' => 'confirmed',
+                    'decided_by' => $admin->wa_id,
+                    'decided_at' => now(),
+                ]);
+                $added++;
+            }
+
+            // Names imported from an earlier post that the admin has since removed.
+            $removed = 0;
+            foreach ($remainingCurrent as $row) {
+                if ($row['booking']->source === 'post' && $row['booking']->status === 'confirmed') {
+                    $row['booking']->update(['status' => 'cancelled']);
+                    $removed++;
+                }
+            }
+
+            return [$added, $removed];
+        });
+    }
+
     /** Admin removes a player by name (latest matching confirmed booking) or by reference. */
     public function removeManual(int $gameId, string $nameOrRef): ?Booking
     {

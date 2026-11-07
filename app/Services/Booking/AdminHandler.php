@@ -16,7 +16,7 @@ use Illuminate\Support\Str;
 class AdminHandler
 {
     public const HELP = "FootballLab bot · admin commands\n"
-        ."• Forward your group post (or start with #games) → I read the games, you tap Publish\n"
+        ."• Forward your group post (or start with #games) → I read the games + names, you tap Publish. Forward an updated list anytime to sync names.\n"
         ."• games → upcoming games + spots\n"
         ."• list 12 → game 12's list, ready to paste in the group\n"
         ."• who 12 → same with phone numbers + booking refs\n"
@@ -225,19 +225,56 @@ class AdminHandler
 
         $batch = (string) Str::uuid();
         $lines = [];
-        DB::transaction(function () use ($games, $batch, $post, &$lines) {
+        $updated = [];
+        $single = count($games) === 1; // your post is reused as the list layout only when it's about one game
+
+        DB::transaction(function () use ($games, $batch, $post, $single, $admin, &$lines, &$updated) {
             foreach ($games as $g) {
-                $game = Game::create($g + ['status' => 'draft', 'batch_id' => $batch, 'source_text' => $post]);
-                $lines[] = "#{$game->id} {$game->label()} · ".(float) $game->price.' '.config('fbl.currency')." · {$game->capacity} spots"
-                    .($game->payment_link ? '' : (config('fbl.defaults.payment_link') ? '' : ' · ⚠️ no pay link'));
+                $players = $g['players'] ?? [];
+                unset($g['players']);
+
+                // Same game already live? Then this post is an updated list: sync it instead of creating a duplicate.
+                $existing = Game::where('starts_at', $g['starts_at'])->where('status', 'published')->get()
+                    ->first(fn (Game $e) => $this->sameVenue($e->venue, $g['venue']));
+
+                if ($existing) {
+                    $existing->update(array_filter([
+                        'capacity' => $g['capacity'],
+                        'source_text' => $single ? $post : $existing->source_text,
+                    ], fn ($v) => $v !== null));
+                    [$add, $rem] = $this->bookings->syncPostPlayers($existing, $players, $admin);
+                    $fresh = $existing->fresh();
+                    $updated[] = "#{$fresh->id} {$fresh->label()} · {$fresh->confirmedPlayers()}/{$fresh->capacity} confirmed · {$fresh->spotsLeft()} left"
+                        .($add || $rem ? " (+{$add} / -{$rem} from your list)" : '');
+
+                    continue;
+                }
+
+                $game = Game::create($g + ['status' => 'draft', 'batch_id' => $batch, 'source_text' => $single ? $post : null]);
+                $this->bookings->syncPostPlayers($game, $players, $admin);
+                $lines[] = "#{$game->id} {$game->label()} · ".(float) $game->price.' '.config('fbl.currency')
+                    ." · {$game->confirmedPlayers()}/{$game->capacity} already in · {$game->spotsLeft()} left";
             }
         });
 
-        $this->messenger->buttons(
-            $admin,
-            "I found ".count($lines)." game(s):\n".implode("\n", $lines)."\n\nPublish so the bot can take bookings?",
-            ['publish:'.$batch => '✅ Publish', 'discard:'.$batch => '🗑 Discard']
-        );
+        if ($updated) {
+            $this->reply($admin, "🔄 Updated from your list:\n".implode("\n", $updated));
+        }
+        if ($lines) {
+            $this->messenger->buttons(
+                $admin,
+                'I found '.count($lines)." new game(s):\n".implode("\n", $lines)."\n\nPublish so the bot can take bookings?",
+                ['publish:'.$batch => '✅ Publish', 'discard:'.$batch => '🗑 Discard']
+            );
+        }
+    }
+
+    private function sameVenue(string $a, string $b): bool
+    {
+        $words = fn (string $s) => array_filter(preg_split('/[^a-z0-9]+/', mb_strtolower($s)), fn ($w) => strlen($w) > 3
+            && ! in_array($w, ['sports', 'ground', 'dubai', 'school', 'schools', 'pitch', 'field'], true));
+
+        return (bool) array_intersect($words($a), $words($b)) || mb_strtolower($a) === mb_strtolower($b);
     }
 
     private function publishBatch(Contact $admin, string $batch, bool $publish): void
