@@ -77,6 +77,12 @@ class WhatsAppWebhookController extends Controller
     {
         $type = $request->input('type');
 
+        if ($type === 'whatsapp.smb.history') {
+            $this->storeHistory($request);
+
+            return;
+        }
+
         if ($type === 'whatsapp.inbound_message.received') {
             $m = (array) $request->input('whatsappInboundMessage', []);
             $from = ltrim((string) ($m['from'] ?? ''), '+');
@@ -108,6 +114,57 @@ class WhatsAppWebhookController extends Controller
                 'to' => $request->input('whatsappMessage.to'),
                 'error' => $request->input('whatsappMessage.errorMessage'),
             ]);
+        }
+    }
+
+    /**
+     * Past WhatsApp Business app chats (coexistence history sync). Stored as conversation history only:
+     * no reply, no 24h window, no bot pause. Lets the bot recognise people we've talked to before.
+     */
+    private function storeHistory(Request $request): void
+    {
+        $in = $request->input('whatsappInboundMessage');
+        $out = $request->input('whatsappMessage');
+        $m = is_array($in) ? $in : (is_array($out) ? $out : null);
+        if (! $m) {
+            return; // progress-only chunk
+        }
+
+        $wamid = (string) ($m['wamid'] ?? '');
+        if ($wamid === '' || Message::where('wa_message_id', $wamid)->exists()) {
+            return;
+        }
+
+        $waId = ltrim((string) (is_array($in) ? ($m['from'] ?? '') : ($m['to'] ?? '')), '+');
+        if ($waId === '' || $waId === ltrim((string) config('whatsapp.business_number'), '+')) {
+            return;
+        }
+
+        $contact = Contact::firstOrCreate(['wa_id' => $waId]);
+        if (is_array($in) && ! $contact->name && ! empty($m['customerProfile']['name'])) {
+            $contact->update(['name' => $m['customerProfile']['name']]);
+        }
+
+        $type = (string) ($m['type'] ?? 'text');
+        $body = $m['text']['body'] ?? $m[$type]['caption'] ?? '['.$type.']';
+        $sentAt = rescue(fn () => \Carbon\Carbon::parse($m['sendTime'] ?? $m['createTime'] ?? 'now'), now(), false);
+
+        $msg = new Message([
+            'contact_id' => $contact->id,
+            'direction' => is_array($in) ? 'in' : 'out',
+            'author' => is_array($in) ? 'client' : 'human',
+            'type' => $type,
+            'body' => $body,
+            'wa_message_id' => $wamid,
+            'payload' => ['history' => true],
+            'processed_at' => now(),
+        ]);
+        $msg->created_at = $sentAt;
+        $msg->updated_at = now();
+        try {
+            $msg->save();
+        } catch (\Illuminate\Database\UniqueConstraintViolationException) {
+            // delivered twice in parallel
         }
     }
 

@@ -192,7 +192,7 @@ class WhatsAppClient
     {
         $response = $this->http()->acceptJson()->timeout(20)->post('https://api.ycloud.com/v2/webhookEndpoints', [
             'url' => $url,
-            'enabledEvents' => ['whatsapp.inbound_message.received', 'whatsapp.smb.message.echoes', 'whatsapp.message.updated'],
+            'enabledEvents' => ['whatsapp.inbound_message.received', 'whatsapp.smb.message.echoes', 'whatsapp.message.updated', 'whatsapp.smb.history'],
             'description' => 'FootballLab WhatsApp bot',
             'status' => 'active',
         ]);

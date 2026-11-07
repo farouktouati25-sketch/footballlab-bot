@@ -43,6 +43,7 @@ class ClientHandler
 
         // Debounce: if the client already sent another message, let that job answer everything at once.
         $newer = $contact->messages()->where('direction', 'in')->where('id', '>', $logged->id)
+            ->where('created_at', '>=', $logged->created_at) // ignore old chats arriving from history sync
             ->whereIn('type', ['text', 'interactive', 'button'])->exists();
         if ($newer) {
             return;
