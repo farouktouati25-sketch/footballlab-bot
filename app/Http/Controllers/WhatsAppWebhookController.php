@@ -34,6 +34,12 @@ class WhatsAppWebhookController extends Controller
             return response('Invalid signature', 401);
         }
 
+        if (config('whatsapp.provider') === 'ycloud') {
+            $this->receiveYCloud($request);
+
+            return response('OK', 200);
+        }
+
         foreach ($request->input('entry', []) as $entry) {
             foreach ($entry['changes'] ?? [] as $change) {
                 $field = $change['field'] ?? null;
@@ -66,6 +72,45 @@ class WhatsAppWebhookController extends Controller
         return response('OK', 200);
     }
 
+    /** YCloud wraps Cloud API message objects in its own event envelope. */
+    private function receiveYCloud(Request $request): void
+    {
+        $type = $request->input('type');
+
+        if ($type === 'whatsapp.inbound_message.received') {
+            $m = (array) $request->input('whatsappInboundMessage', []);
+            $from = ltrim((string) ($m['from'] ?? ''), '+');
+            // Reshape to the Cloud API message the rest of the app understands; the wamid is the message id.
+            $message = $m;
+            $message['id'] = (string) ($m['wamid'] ?? $m['id'] ?? '');
+            $message['from'] = $from;
+            if (! isset($message['timestamp']) && isset($m['sendTime'])) {
+                $message['timestamp'] = (string) strtotime((string) $m['sendTime']);
+            }
+            ProcessInboundMessage::dispatch($message, ['contacts' => [[
+                'wa_id' => $from,
+                'profile' => ['name' => $m['customerProfile']['name'] ?? null],
+            ]]]);
+        }
+
+        if ($type === 'whatsapp.smb.message.echoes') {
+            $m = (array) $request->input('whatsappMessage', []);
+            $this->recordHumanReply([
+                'to' => ltrim((string) ($m['to'] ?? ''), '+'),
+                'id' => (string) ($m['wamid'] ?? $m['id'] ?? ''),
+                'type' => $m['type'] ?? 'text',
+                'text' => $m['text'] ?? null,
+            ]);
+        }
+
+        if ($type === 'whatsapp.message.updated' && $request->input('whatsappMessage.status') === 'failed') {
+            Log::warning('WhatsApp delivery failed', [
+                'to' => $request->input('whatsappMessage.to'),
+                'error' => $request->input('whatsappMessage.errorMessage'),
+            ]);
+        }
+    }
+
     private function recordHumanReply(array $echo): void
     {
         $to = (string) ($echo['to'] ?? '');
@@ -93,6 +138,23 @@ class WhatsAppWebhookController extends Controller
 
     private function signatureIsValid(Request $request): bool
     {
+        if (config('whatsapp.provider') === 'ycloud') {
+            // YCloud-Signature: t=<unix seconds>,s=<hex hmac_sha256(secret, "t.<raw body>")>
+            $secret = (string) config('whatsapp.webhook_secret');
+            $parts = [];
+            foreach (explode(',', (string) $request->header('YCloud-Signature', '')) as $kv) {
+                [$k, $v] = array_pad(explode('=', trim($kv), 2), 2, '');
+                $parts[$k] = $v;
+            }
+            $t = $parts['t'] ?? '';
+            $s = $parts['s'] ?? '';
+            if ($secret === '' || $t === '' || $s === '' || abs(time() - (int) $t) > 300) {
+                return false;
+            }
+
+            return hash_equals(hash_hmac('sha256', $t.'.'.$request->getContent(), $secret), strtolower($s));
+        }
+
         if (config('whatsapp.provider') === '360dialog') {
             $shared = (string) config('whatsapp.webhook_secret');
 

@@ -13,6 +13,21 @@ class SetWebhook extends Command
 
     public function handle(WhatsAppClient $client): int
     {
+        if ($client->isYCloud()) {
+            $url = $this->option('url') ?: rtrim((string) config('app.url'), '/').'/api/webhooks/whatsapp';
+            $secret = $client->createYCloudWebhook($url);
+            if (! $secret) {
+                $this->error('YCloud refused the webhook. Check WHATSAPP_TOKEN (your YCloud API key) and storage/logs/laravel.log.');
+
+                return self::FAILURE;
+            }
+            $this->info("Webhook set to {$url}");
+            $this->warn('Now put this in Laravel Cloud and redeploy:');
+            $this->line('WHATSAPP_WEBHOOK_SECRET='.$secret);
+
+            return self::SUCCESS;
+        }
+
         if (! $client->is360()) {
             $this->warn('WHATSAPP_PROVIDER is "meta": set the webhook in the Meta app dashboard instead (see README).');
 

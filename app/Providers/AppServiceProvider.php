@@ -16,6 +16,7 @@ class AppServiceProvider extends ServiceProvider
             baseUrl: (string) config('whatsapp.api_base'),
             graphVersion: (string) config('whatsapp.graph_version'),
             provider: (string) config('whatsapp.provider'),
+            businessNumber: (string) config('whatsapp.business_number'),
         ));
 
         $this->app->singleton(\App\Services\Payments\ZiinaClient::class, fn () => new \App\Services\Payments\ZiinaClient(

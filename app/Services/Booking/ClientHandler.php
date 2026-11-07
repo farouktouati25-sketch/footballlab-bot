@@ -66,7 +66,7 @@ class ClientHandler
         }
 
         $alreadyReported = $booking->status === 'awaiting_approval';
-        $proof = $this->whatsapp->reuploadMedia($inbound->mediaId);
+        $proof = $this->whatsapp->reuploadMedia($inbound->mediaId, $inbound->mediaLink);
         $note = $inbound->text ?: null;
         if (! $proof) {
             $note = trim('Screenshot received but could not be attached, check the chat. '.($note ?? ''));

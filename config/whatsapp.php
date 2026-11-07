@@ -1,14 +1,17 @@
 <?php
 
 return [
-    // "meta" (direct Cloud API) or "360dialog" (BSP; needed for coexistence onboarding).
+    // "meta" (direct Cloud API), "360dialog" or "ycloud" (BSPs that support coexistence).
     'provider' => env('WHATSAPP_PROVIDER', 'meta'),
 
     // 360dialog: the webhook carries this shared secret in an X-Webhook-Secret header
     // (360dialog doesn't sign webhooks the way Meta does).
     'webhook_secret' => env('WHATSAPP_WEBHOOK_SECRET'),
 
-    // Permanent System User token with whatsapp_business_messaging + whatsapp_business_management.
+    // Our WhatsApp number in E.164 (YCloud needs it as the sender).
+    'business_number' => env('WHATSAPP_BUSINESS_NUMBER', '+'.env('FBL_BOT_NUMBER', '971503741554')),
+
+    // Meta: permanent System User token. 360dialog / YCloud: the provider's API key. with whatsapp_business_messaging + whatsapp_business_management.
     'token' => env('WHATSAPP_TOKEN'),
 
     // Phone number ID of +971 50 374 1554 (NOT the phone number itself).

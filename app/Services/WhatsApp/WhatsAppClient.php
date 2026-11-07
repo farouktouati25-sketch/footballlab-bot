@@ -11,6 +11,8 @@ use Illuminate\Support\Facades\Log;
  *
  * provider "meta":      https://graph.facebook.com/{version}/{phone_id}/messages, Bearer token
  * provider "360dialog": https://waba-v2.360dialog.io/messages, D360-API-KEY header (same JSON bodies)
+ * provider "ycloud":    https://api.ycloud.com/v2/whatsapp/messages/sendDirectly, X-API-Key header,
+ *                       same message objects plus "from" (our number) and E.164 "to"
  */
 class WhatsAppClient
 {
@@ -20,7 +22,13 @@ class WhatsAppClient
         private readonly string $baseUrl,
         private readonly string $graphVersion,
         private readonly string $provider = 'meta',
+        private readonly string $businessNumber = '',
     ) {}
+
+    public function isYCloud(): bool
+    {
+        return $this->provider === 'ycloud';
+    }
 
     public function is360(): bool
     {
@@ -29,9 +37,11 @@ class WhatsAppClient
 
     private function http(): \Illuminate\Http\Client\PendingRequest
     {
-        return $this->is360()
-            ? Http::withHeaders(['D360-API-KEY' => $this->token])
-            : Http::withToken($this->token);
+        return match (true) {
+            $this->is360() => Http::withHeaders(['D360-API-KEY' => $this->token]),
+            $this->isYCloud() => Http::withHeaders(['X-API-Key' => $this->token]),
+            default => Http::withToken($this->token),
+        };
     }
 
     public function send(array $payload): ?string
@@ -41,7 +51,7 @@ class WhatsAppClient
                 ->acceptJson()
                 ->timeout(20)
                 ->retry(2, 500, fn ($e) => $e instanceof \Illuminate\Http\Client\ConnectionException, throw: false)
-                ->post($this->messagesUrl(), $payload);
+                ->post($this->messagesUrl(), $this->isYCloud() ? $this->toYCloud($payload) : $payload);
         } catch (\Illuminate\Http\Client\ConnectionException $e) {
             // Never let one network blip abort a loop (e.g. the second admin missing an approval request).
             Log::error('WhatsApp send failed: connection', ['error' => $e->getMessage(), 'to' => $payload['to'] ?? null]);
@@ -49,10 +59,10 @@ class WhatsAppClient
             return null;
         }
 
-        if ($response->failed()) {
+        if ($response->failed() || ($this->isYCloud() && $response->json('status') === 'failed')) {
             Log::error('WhatsApp send failed', [
                 'status' => $response->status(),
-                'error' => $response->json('error'),
+                'error' => $response->json('error') ?? $response->json('errorMessage') ?? $response->json('whatsappApiError'),
                 'to' => $payload['to'] ?? null,
                 'type' => $payload['type'] ?? null,
             ]);
@@ -60,11 +70,29 @@ class WhatsAppClient
             return null;
         }
 
-        return $response->json('messages.0.id');
+        return $this->isYCloud()
+            ? ($response->json('wamid') ?? $response->json('id'))
+            : $response->json('messages.0.id');
+    }
+
+    /** YCloud takes the Cloud API message object, minus envelope fields, plus our "from" number. */
+    private function toYCloud(array $payload): array
+    {
+        unset($payload['messaging_product'], $payload['recipient_type']);
+        $payload['from'] = $this->businessNumber;
+        $payload['to'] = '+'.ltrim((string) ($payload['to'] ?? ''), '+');
+
+        return $payload;
     }
 
     public function markRead(string $messageId): void
     {
+        if ($this->isYCloud()) {
+            $this->http()->timeout(10)->post('https://api.ycloud.com/v2/whatsapp/inboundMessages/'.rawurlencode($messageId).'/markAsRead');
+
+            return;
+        }
+
         $this->http()->timeout(10)->post($this->messagesUrl(), Payloads::markRead($messageId));
     }
 
@@ -74,8 +102,12 @@ class WhatsAppClient
      *
      * @return array{id:string,mime:string}|null
      */
-    public function reuploadMedia(string $inboundMediaId): ?array
+    public function reuploadMedia(string $inboundMediaId, ?string $downloadLink = null): ?array
     {
+        if ($this->isYCloud()) {
+            return $this->reuploadYCloud($downloadLink);
+        }
+
         try {
             $meta = $this->http()->timeout(15)->get($this->path($inboundMediaId))->throw();
             $downloadUrl = $meta->json('url');
@@ -107,6 +139,51 @@ class WhatsAppClient
 
             return null;
         }
+    }
+
+    /** YCloud: inbound webhooks carry a short-lived download link; fetch it, then upload to our number. */
+    private function reuploadYCloud(?string $link): ?array
+    {
+        if (! $link) {
+            return null;
+        }
+        try {
+            $file = $this->http()->timeout(30)->get($link)->throw();
+            $mime = strtok((string) $file->header('Content-Type'), ';') ?: 'image/jpeg';
+            $ext = match ($mime) { 'image/png' => 'png', 'application/pdf' => 'pdf', 'image/webp' => 'webp', default => 'jpg' };
+
+            $upload = $this->http()->timeout(30)
+                ->attach('file', $file->body(), 'payment-proof.'.$ext, ['Content-Type' => $mime])
+                ->post('https://api.ycloud.com/v2/whatsapp/media/'.rawurlencode($this->businessNumber).'/upload')
+                ->throw();
+
+            return $upload->json('id') ? ['id' => (string) $upload->json('id'), 'mime' => $mime] : null;
+        } catch (\Throwable $e) {
+            Log::warning('YCloud media re-upload failed', ['error' => $e->getMessage()]);
+
+            return null;
+        }
+    }
+
+    /**
+     * YCloud: register our webhook. Returns the signing secret YCloud generates (null on failure).
+     */
+    public function createYCloudWebhook(string $url): ?string
+    {
+        $response = $this->http()->acceptJson()->timeout(20)->post('https://api.ycloud.com/v2/webhookEndpoints', [
+            'url' => $url,
+            'enabledEvents' => ['whatsapp.inbound_message.received', 'whatsapp.smb.message.echoes', 'whatsapp.message.updated'],
+            'description' => 'FootballLab WhatsApp bot',
+            'status' => 'active',
+        ]);
+
+        if ($response->failed()) {
+            Log::error('YCloud webhook config failed', ['status' => $response->status(), 'body' => $response->body()]);
+
+            return null;
+        }
+
+        return $response->json('secret');
     }
 
     /** 360dialog only: point our webhook at this app, with a shared secret header. */

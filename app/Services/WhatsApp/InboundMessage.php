@@ -21,6 +21,7 @@ final class InboundMessage
         public readonly bool $forwarded,
         public readonly ?array $referral,
         public readonly ?string $replyToId,
+        public readonly ?string $mediaLink = null,
         public readonly int $timestamp,
         public readonly array $raw,
     ) {}
@@ -96,6 +97,7 @@ final class InboundMessage
             forwarded: (bool) (($message['context']['forwarded'] ?? false) || ($message['context']['frequently_forwarded'] ?? false)),
             referral: isset($message['referral']) && is_array($message['referral']) ? $message['referral'] : null,
             replyToId: isset($message['context']['id']) ? (string) $message['context']['id'] : null,
+            mediaLink: in_array($type, ['image', 'document', 'video', 'sticker', 'audio'], true) ? ($message[$type]['link'] ?? null) : null,
             timestamp: (int) ($message['timestamp'] ?? time()),
             raw: $message,
         );
