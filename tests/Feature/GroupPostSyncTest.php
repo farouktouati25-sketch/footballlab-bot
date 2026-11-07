@@ -39,7 +39,7 @@ class GroupPostSyncTest extends TestCase
         });
     }
 
-    private function post(array $names, int $slots = 14): string
+    private function groupPost(array $names, int $slots = 14): string
     {
         $rows = [];
         for ($i = 0; $i < $slots; $i++) {
@@ -67,7 +67,7 @@ class GroupPostSyncTest extends TestCase
     {
         $names = $this->thirteen();
         $this->claude = [$this->parsed($names)];
-        $this->admin($this->post($names), forwarded: true);
+        $this->admin($this->groupPost($names), forwarded: true);
 
         $game = Game::sole();
         $this->assertSame(13, $game->confirmedPlayers());
@@ -89,7 +89,7 @@ class GroupPostSyncTest extends TestCase
     {
         $names = $this->thirteen();
         $this->claude = [$this->parsed($names)];
-        $this->admin($this->post($names), forwarded: true);
+        $this->admin($this->groupPost($names), forwarded: true);
         $game = Game::sole();
         $game->update(['status' => 'published']);
 
@@ -98,7 +98,7 @@ class GroupPostSyncTest extends TestCase
         $updated[] = 'Bilal';
         $updated[] = 'Moe';
         $this->claude = [$this->parsed($updated)];
-        $this->admin($this->post($updated), forwarded: true);
+        $this->admin($this->groupPost($updated), forwarded: true);
 
         $this->assertSame(1, Game::count());
         $this->assertSame(14, $game->fresh()->confirmedPlayers());
