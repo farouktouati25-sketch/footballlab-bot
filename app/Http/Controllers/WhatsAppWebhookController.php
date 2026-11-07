@@ -1,0 +1,114 @@
+<?php
+
+namespace App\Http\Controllers;
+
+use App\Jobs\ProcessInboundMessage;
+use App\Models\Contact;
+use App\Models\Message;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Log;
+
+class WhatsAppWebhookController extends Controller
+{
+    /** Meta calls this once when you save the webhook URL. */
+    public function verify(Request $request)
+    {
+        $token = (string) config('whatsapp.verify_token');
+        if ($token === '') {
+            return response('Forbidden', 403);
+        }
+
+        if ($request->query('hub_mode') === 'subscribe'
+            && hash_equals($token, (string) $request->query('hub_verify_token'))) {
+            return response((string) $request->query('hub_challenge'), 200)->header('Content-Type', 'text/plain');
+        }
+
+        return response('Forbidden', 403);
+    }
+
+    public function receive(Request $request)
+    {
+        if (! $this->signatureIsValid($request)) {
+            Log::warning('WhatsApp webhook rejected: bad signature');
+
+            return response('Invalid signature', 401);
+        }
+
+        foreach ($request->input('entry', []) as $entry) {
+            foreach ($entry['changes'] ?? [] as $change) {
+                $field = $change['field'] ?? null;
+                $value = $change['value'] ?? [];
+
+                if ($field === 'messages') {
+                    foreach ($value['messages'] ?? [] as $message) {
+                        ProcessInboundMessage::dispatch($message, ['contacts' => $value['contacts'] ?? []]);
+                    }
+                    foreach ($value['statuses'] ?? [] as $status) {
+                        if (($status['status'] ?? null) === 'failed') {
+                            Log::warning('WhatsApp delivery failed', [
+                                'to' => $status['recipient_id'] ?? null,
+                                'errors' => $status['errors'] ?? null,
+                            ]);
+                        }
+                    }
+                }
+
+                // Coexistence: a human replied from the WhatsApp Business app on the phone.
+                if ($field === 'smb_message_echoes') {
+                    foreach ($value['message_echoes'] ?? [] as $echo) {
+                        $this->recordHumanReply($echo);
+                    }
+                }
+            }
+        }
+
+        // Always 200 fast, or Meta retries and eventually disables the webhook.
+        return response('OK', 200);
+    }
+
+    private function recordHumanReply(array $echo): void
+    {
+        $to = (string) ($echo['to'] ?? '');
+        $id = (string) ($echo['id'] ?? '');
+        if ($to === '' || ($id !== '' && Message::where('wa_message_id', $id)->exists())) {
+            return;
+        }
+
+        $contact = Contact::firstOrCreate(['wa_id' => $to]);
+        $type = (string) ($echo['type'] ?? 'text');
+
+        Message::create([
+            'contact_id' => $contact->id,
+            'direction' => 'out',
+            'author' => 'human',
+            'type' => $type,
+            'body' => $echo['text']['body'] ?? '['.$type.' sent by team]',
+            'wa_message_id' => $id ?: null,
+            'payload' => ['echo' => true],
+        ]);
+
+        // The team took over this chat: keep the bot quiet for a while.
+        $contact->update(['bot_paused_until' => now()->addHours((int) config('fbl.human_takeover_hours', 12))]);
+    }
+
+    private function signatureIsValid(Request $request): bool
+    {
+        if (config('whatsapp.provider') === '360dialog') {
+            $shared = (string) config('whatsapp.webhook_secret');
+
+            return $shared !== '' && hash_equals($shared, (string) $request->header('X-Webhook-Secret', ''));
+        }
+
+        $secret = (string) config('whatsapp.app_secret');
+
+        if ($secret === '') {
+            // Only tolerated locally. In production a missing secret means anyone could post fake messages.
+            return app()->environment(['local', 'testing']);
+        }
+
+        $header = (string) $request->header('X-Hub-Signature-256', '');
+        $expected = 'sha256='.hash_hmac('sha256', $request->getContent(), $secret);
+
+        return $header !== '' && hash_equals($expected, $header);
+    }
+}

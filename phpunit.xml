@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<phpunit xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:noNamespaceSchemaLocation="vendor/phpunit/phpunit/phpunit.xsd"
+         bootstrap="vendor/autoload.php"
+         colors="true">
+    <testsuites>
+        <testsuite name="Unit">
+            <directory>tests/Unit</directory>
+        </testsuite>
+        <testsuite name="Feature">
+            <directory>tests/Feature</directory>
+        </testsuite>
+    </testsuites>
+    <source>
+        <include>
+            <directory>app</directory>
+        </include>
+    </source>
+    <php>
+        <env name="APP_ENV" value="testing" force="true"/>
+        <env name="APP_KEY" value="base64:2fl+Ktvkfl+Fuz4Qp/A75G2RTiWVA/ZoKZvp6fiiM10=" force="true"/>
+        <env name="BCRYPT_ROUNDS" value="4" force="true"/>
+        <env name="CACHE_STORE" value="array" force="true"/>
+        <env name="DB_CONNECTION" value="sqlite" force="true"/>
+        <env name="DB_DATABASE" value=":memory:" force="true"/>
+        <env name="QUEUE_CONNECTION" value="sync" force="true"/>
+        <env name="SESSION_DRIVER" value="array" force="true"/>
+        <env name="WHATSAPP_TOKEN" value="test-token" force="true"/>
+        <env name="WHATSAPP_PHONE_NUMBER_ID" value="PHONE_ID" force="true"/>
+        <env name="WHATSAPP_APP_SECRET" value="test-secret" force="true"/>
+        <env name="WHATSAPP_VERIFY_TOKEN" value="verify-me" force="true"/>
+        <env name="WHATSAPP_GRAPH_VERSION" value="v23.0" force="true"/>
+        <env name="ADMIN_NUMBERS" value="971500000091,971500000092" force="true"/>
+        <env name="ADMIN_NAMES" value="Farouk,Partner" force="true"/>
+        <env name="ANTHROPIC_API_KEY" value="test-key" force="true"/>
+        <env name="FBL_DEFAULT_PAYMENT_LINK" value="https://pay.example.com/fbl" force="true"/>
+    </php>
+</phpunit>
