@@ -26,6 +26,7 @@ Today in Dubai is {$today}. Resolve weekday names to the NEXT occurrence (today 
 Known venues (use these exact names when the post clearly refers to one): {$venues}.
 If price is missing use {$defaultPrice}. If the number of spots/players is missing use {$defaultCapacity}.
 Times are Dubai local, 24h HH:MM. One entry per game. Ignore anything that is not a game.
+Always answer by calling the save_games tool exactly once (with an empty list if there are no games). Never answer in plain text.
 PROMPT;
 
         $tool = [
@@ -60,7 +61,7 @@ PROMPT;
             $system,
             [['role' => 'user', 'content' => $post]],
             [$tool],
-            ['type' => 'tool', 'name' => 'save_games'],
+            null, // forced tool_choice isn't supported on every model; the prompt requires the tool call
             2000,
         );
 
