@@ -145,16 +145,11 @@ class ReminderService
                 .($r->status === 'sent' ? ' ✅ messaged' : '');
         })->implode("\n");
 
-        $invite = "Hey bro ⚽ {$game->localStart()->format('l')} game is on!\n"
-            ."📅 {$game->label()}\n💰 ".(float) $game->price.' '.config('fbl.currency')." · {$game->spotsLeft()} spots left\n"
-            .'You in? 👊';
-
         $ok = false;
         foreach ($only ? [$only] : $this->messenger->adminContacts() as $admin) {
             $ok = $this->messenger->alertAdmin($admin,
                 "📣 Players to invite for #{$game->id} ({$game->label()}):\n\n{$lines}\n\n"
                 ."Message them from the phone. When they reply, I take over the chat and book them.") || $ok;
-            $this->messenger->alertAdmin($admin, $invite);
         }
 
         return $ok;

@@ -16,7 +16,7 @@ use Illuminate\Support\Str;
 class AdminHandler
 {
     public const HELP = "FootballLab bot · admin commands\n"
-        ."• After you publish, I send who to invite (asked for that day / usual day / no game in 3+ days) + a message to copy. You text them from the phone; I take over when they reply. Again anytime: invite N\n"
+        ."• After you publish, I send who to invite (asked for that day / usual day / no game in 3+ days) . You text them from the phone; I take over when they reply. Again anytime: invite N\n"
         ."• players → the player sheet (CSV for Excel)\n"
         ."• Spot frees up in a full game → I ask you to offer it to the next on the waiting list (or: offer N / skip N)\n"
         ."• Forward your group post (or start with #games) → I read the games + names, you tap Publish. Forward an updated list anytime to sync names.\n"

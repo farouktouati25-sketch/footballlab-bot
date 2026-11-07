@@ -85,8 +85,7 @@ class RemindersTest extends TestCase
             && str_contains($r->data()['text']['body'] ?? '', "2. Karim")
             && str_contains($r->data()['text']['body'] ?? '', "3. Omar")
             && ! str_contains($r->data()['text']['body'] ?? '', 'Sami'));
-        Http::assertSent(fn (Request $r) => ($r->data()['to'] ?? null) === '971500000091'
-            && str_contains($r->data()['text']['body'] ?? '', 'You in? 👊'));
+        Http::assertNotSent(fn (Request $r) => str_contains($r->data()['text']['body'] ?? '', 'You in? 👊'));
 
         // Admin texts Omar from the phone: the bot is NOT paused, so it answers Omar's reply.
         $this->echo('971500000002', 'Hey bro ⚽ Friday game is on!');
