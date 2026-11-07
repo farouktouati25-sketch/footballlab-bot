@@ -44,6 +44,13 @@ class BookingHousekeeping extends Command
                 }
             });
 
+        // 1b) Spots freed (expired holds, cancellations): ask admins about the next person waiting.
+        $roster = app(\App\Services\Booking\RosterService::class);
+        \App\Models\Game::where('status', 'published')->where('starts_at', '>', now())
+            ->whereHas('waitlist', fn ($q) => $q->whereNull('notified_at')->whereNull('skipped_at')->whereNull('admin_asked_at'))
+            ->get()
+            ->each(fn ($game) => $roster->offerFreedSpots($game));
+
         // 2a) Clients waiting 15+ min for a payment link: one nudge to admins.
         $noLink = Booking::where('status', 'pending_payment')->whereNull('payment_url')
             ->whereNotNull('link_requested_at')->whereNull('admin_reminded_at')

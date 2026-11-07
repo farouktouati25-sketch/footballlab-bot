@@ -11,7 +11,7 @@ class AvailabilityRequest extends Model
 
     protected function casts(): array
     {
-        return ['play_date' => 'date', 'notified_at' => 'datetime', 'players' => 'integer'];
+        return ['notified_at' => 'datetime', 'players' => 'integer'];
     }
 
     public function contact(): BelongsTo

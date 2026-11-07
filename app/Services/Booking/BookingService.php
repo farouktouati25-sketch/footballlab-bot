@@ -59,6 +59,9 @@ class BookingService
                 'status' => 'pending_payment',
             ]);
 
+            // Booked now, so off the waiting list for this game.
+            \App\Models\WaitlistEntry::where('contact_id', $contact->id)->where('game_id', $game->id)->delete();
+
             return ['ok' => true, 'booking' => $booking->load('game')];
         });
     }

@@ -62,7 +62,7 @@ class AgentTools
             ],
             [
                 'name' => 'join_waitlist',
-                'description' => 'Put the client on the waitlist for a FULL game (spots_left = 0). When the team opens another game that day, the client is messaged automatically.',
+                'description' => 'Put the client on the waiting list for a FULL game (spots_left = 0). No payment. When a place frees up (and the team approves) or a second game opens, the client is messaged automatically.',
                 'input_schema' => [
                     'type' => 'object',
                     'properties' => [
@@ -228,8 +228,9 @@ class AgentTools
             ['players' => $players, 'notified_at' => null],
         );
         $this->roster->maybeAlertWaitlist($game);
+        $this->roster->shareUpdated($game, ($contact->name ?: 'Someone').' joined the waiting list');
 
-        return ['ok' => true, 'instructions' => 'Tell the client they are on the waitlist and will get a message here if a spot or a second game opens. No payment needed now.'];
+        return ['ok' => true, 'instructions' => 'Tell the client (friendly, e.g. "Done bro 👊") they are on the waiting list, no payment needed now, and you will message them here as soon as a place opens.'];
     }
 
     private function myBookings(Contact $contact): array
@@ -261,6 +262,8 @@ class AgentTools
         if (! $this->bookings->cancelByClient($booking)) {
             return ['error' => 'Only unpaid bookings can be cancelled here. This one is '.$booking->status.'; hand off to a human.'];
         }
+
+        $this->roster->offerFreedSpots($booking->game);
 
         return ['ok' => true, 'booking_reference' => $booking->reference, 'status' => 'cancelled'];
     }

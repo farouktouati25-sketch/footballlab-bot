@@ -50,7 +50,7 @@ class RemindersTest extends TestCase
         $this->inbound('971500000001', "I'll play next Friday");
 
         $req = AvailabilityRequest::sole();
-        $this->assertSame($friday, $req->play_date->toDateString());
+        $this->assertSame($friday, substr((string) $req->play_date, 0, 10));
         Http::assertSent(fn (Request $r) => str_contains($r->data()['text']['body'] ?? '', 'Saved ✅'));
     }
 
@@ -136,6 +136,34 @@ class RemindersTest extends TestCase
         Http::assertSent(fn (Request $r) => ($r->data()['to'] ?? null) === '971500000091'
             && str_contains($r->data()['interactive']['body']['text'] ?? '', 'PAY CASH ON THE SPOT')
             && str_contains(json_encode($r->data(), JSON_UNESCAPED_UNICODE), 'Accept cash'));
+    }
+
+    public function test_freed_spot_asks_admin_then_offers_to_next_waiting_client(): void
+    {
+        Contact::create(['wa_id' => '971500000091', 'last_inbound_at' => now()]);
+        $game = Game::create(['starts_at' => now()->addDays(2), 'venue' => 'Al Safa', 'price' => 50, 'capacity' => 1, 'status' => 'published']);
+        Booking::create(['contact_id' => null, 'source' => 'manual', 'game_id' => $game->id, 'player_name' => 'Omar', 'players' => 1, 'amount' => 50, 'status' => 'confirmed']);
+        $waiting = Contact::create(['wa_id' => '971500000001', 'name' => 'Ali', 'last_inbound_at' => now()]);
+        $entry = \App\Models\WaitlistEntry::create(['contact_id' => $waiting->id, 'game_id' => $game->id, 'players' => 1]);
+
+        // Omar drops out → admin is asked.
+        $this->inbound('971500000091', "remove {$game->id} omar");
+        $this->assertNotNull($entry->fresh()->admin_asked_at);
+        Http::assertSent(fn (Request $r) => ($r->data()['to'] ?? null) === '971500000091'
+            && str_contains($r->data()['interactive']['body']['text'] ?? '', 'Next on the waiting list: Ali'));
+
+        // Asking again doesn't spam.
+        $this->assertSame(0, app(\App\Services\Booking\RosterService::class)->offerFreedSpots($game));
+
+        // Admin taps "Send offer" → client gets it.
+        $this->webhook(['field' => 'messages', 'value' => [
+            'contacts' => [['wa_id' => '971500000091', 'profile' => ['name' => 'Farouk']]],
+            'messages' => [['type' => 'interactive', 'interactive' => ['type' => 'button_reply', 'button_reply' => ['id' => 'wl_send:'.$entry->id, 'title' => 'Send offer']],
+                'id' => 'wamid.in.'.uniqid(), 'from' => '971500000091', 'timestamp' => (string) time()]],
+        ]]);
+        $this->assertNotNull($entry->fresh()->offer_sent_at);
+        Http::assertSent(fn (Request $r) => ($r->data()['to'] ?? null) === '971500000001'
+            && str_contains($r->data()['text']['body'] ?? '', 'A place just opened'));
     }
 
     private function inbound(string $from, string $text): void

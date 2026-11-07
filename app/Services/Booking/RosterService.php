@@ -217,4 +217,82 @@ class RosterService
 
         return $sent;
     }
+
+    /**
+     * A spot is free in a game with people waiting: ask the admins whether to offer it to the next
+     * person. One question per free spot; an offer the client ignores for 2 hours stops counting.
+     * Returns how many admin questions were sent.
+     */
+    public function offerFreedSpots(Game $game): int
+    {
+        $game = $game->fresh();
+        if (! $game || $game->status !== 'published' || $game->starts_at->isPast()) {
+            return 0;
+        }
+        $free = $game->spotsLeft();
+        if ($free <= 0) {
+            return 0;
+        }
+
+        $open = fn () => $game->waitlist()->whereNull('notified_at')->whereNull('skipped_at');
+        $outstanding = $open()->whereNotNull('admin_asked_at')
+            ->where(fn ($q) => $q->whereNull('offer_sent_at')->orWhere('offer_sent_at', '>', now()->subHours(2)))
+            ->count();
+
+        $asked = 0;
+        while ($outstanding + $asked < $free) {
+            $next = $open()->whereNull('admin_asked_at')->with('contact')->orderBy('id')->first();
+            if (! $next) {
+                break;
+            }
+            $next->update(['admin_asked_at' => now()]);
+            $who = ($next->contact?->name ?: 'Player').($next->players > 1 ? " (+".($next->players - 1).')' : '')
+                .($next->contact ? ' · +'.$next->contact->wa_id : '');
+            $text = "🪑 A spot opened in #{$game->id} ({$game->label()}): {$free} free now.\n"
+                ."Next on the waiting list: {$who}\n\nSend them the offer?";
+
+            foreach ($this->messenger->adminContacts() as $admin) {
+                $admin->windowIsOpen()
+                    ? $this->messenger->buttons($admin, $text, ['wl_send:'.$next->id => '📩 Send offer', 'wl_skip:'.$next->id => '⏭ Skip'])
+                    : $this->messenger->alertAdmin($admin, $text." Reply: offer {$next->id} (or skip {$next->id})");
+            }
+            $asked++;
+        }
+
+        return $asked;
+    }
+
+    /** Admin said yes: tell the waiting client a place opened. */
+    public function sendWaitlistOffer(WaitlistEntry $entry, \App\Models\Contact $admin): string
+    {
+        $entry->loadMissing(['contact', 'game']);
+        if ($entry->offer_sent_at) {
+            return 'Already offered to '.($entry->contact?->name ?: 'them').' ✅';
+        }
+        if (! $entry->contact || ! $entry->game) {
+            return 'That waiting list entry no longer exists.';
+        }
+        $game = $entry->game;
+        $client = $entry->contact;
+        $name = $client->name ? strtok(trim($client->name), ' ') : 'bro';
+
+        $ok = $client->windowIsOpen()
+            ? $this->messenger->text($client,
+                "Good news {$name} ⚽ A place just opened in {$game->label()}!\n"
+                .'Are you still in? Reply YES and I\'ll send you the payment link 👊',
+                'bot', ['kind' => 'waitlist_offer', 'game_id' => $game->id])
+            : $this->messenger->template($client, (string) config('whatsapp.templates.waitlist_opened'), [$name, $game->label()],
+                [], ['kind' => 'waitlist_offer', 'game_id' => $game->id]);
+
+        $entry->update(['offer_sent_at' => now()]);
+        foreach ($this->messenger->adminContacts() as $other) {
+            if ($other->wa_id !== $admin->wa_id) {
+                $this->messenger->alertAdmin($other, "📩 Waiting-list offer for #{$game->id} sent to {$client->name} by {$admin->adminName()}");
+            }
+        }
+
+        return $ok
+            ? "📩 Offer sent to {$client->name}. When they say yes, the bot books them and asks for the payment link as usual."
+            : "⚠️ Couldn't reach {$client->name} (chat closed and template not approved?). Message +{$client->wa_id} yourself.";
+    }
 }

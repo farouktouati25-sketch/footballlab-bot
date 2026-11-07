@@ -16,6 +16,7 @@ use Illuminate\Support\Str;
 class AdminHandler
 {
     public const HELP = "FootballLab bot · admin commands\n"
+        ."• Spot frees up in a full game → I ask you to offer it to the next on the waiting list (or: offer N / skip N)\n"
         ."• Forward your group post (or start with #games) → I read the games + names, you tap Publish. Forward an updated list anytime to sync names.\n"
         ."• games → upcoming games + spots\n"
         ."• list 12 → game 12's list, ready to paste in the group\n"
@@ -79,6 +80,12 @@ class AdminHandler
             return;
         }
 
+        if (preg_match('/^(offer|skip)\s+(\d+)$/i', $text, $m)) {
+            $this->waitlistAnswer($admin, (int) $m[2], mb_strtolower($m[1]) === 'offer');
+
+            return;
+        }
+
         if (preg_match('/^list\s+(\d+)$/i', $text, $m)) {
             $game = Game::find((int) $m[1]);
             $this->reply($admin, $game ? $this->roster->groupText($game) : "No game #{$m[1]}.");
@@ -106,6 +113,7 @@ class AdminHandler
                 $this->reply($admin, "Removed {$removed->player_name} ×{$removed->players} from game #{$m[1]}."
                     .($removed->source === 'bot' ? ' ⚠️ They paid through the bot: message them about a refund.' : ''));
                 $this->roster->shareUpdated($removed->game, "{$removed->player_name} removed");
+                $this->roster->offerFreedSpots($removed->game);
             }
 
             return;
@@ -180,13 +188,38 @@ class AdminHandler
             'reject' => $this->decide($admin, (int) $ref, false),
             'publish' => $this->publishBatch($admin, $ref, true),
             'discard' => $this->publishBatch($admin, $ref, false),
+            'wl_send' => $this->waitlistAnswer($admin, (int) $ref, true),
+            'wl_skip' => $this->waitlistAnswer($admin, (int) $ref, false),
             default => $this->reply($admin, self::HELP),
         };
+    }
+
+    private function waitlistAnswer(Contact $admin, int $entryId, bool $send): void
+    {
+        $entry = \App\Models\WaitlistEntry::with(['contact', 'game'])->find($entryId);
+        if (! $entry) {
+            $this->reply($admin, 'That waiting-list entry is gone (they probably booked already).');
+
+            return;
+        }
+        if ($send) {
+            $this->reply($admin, $this->roster->sendWaitlistOffer($entry, $admin));
+
+            return;
+        }
+        if (! $entry->skipped_at && ! $entry->offer_sent_at) {
+            $entry->update(['skipped_at' => now()]);
+        }
+        $this->reply($admin, '⏭ Skipped '.($entry->contact?->name ?: 'them').'.');
+        $this->roster->offerFreedSpots($entry->game); // ask about the next person
     }
 
     private function decide(Contact $admin, int $bookingId, bool $approve): void
     {
         $outcome = $this->bookings->decide($bookingId, $admin, $approve);
+        if (! $approve && $outcome['result'] === 'done' && isset($outcome['booking'])) {
+            $this->roster->offerFreedSpots($outcome['booking']->game);
+        }
 
         if ($outcome['result'] === 'missing') {
             $this->reply($admin, 'That booking no longer exists.');
@@ -226,9 +259,10 @@ class AdminHandler
         $batch = (string) Str::uuid();
         $lines = [];
         $updated = [];
+        $freed = [];
         $single = count($games) === 1; // your post is reused as the list layout only when it's about one game
 
-        DB::transaction(function () use ($games, $batch, $post, $single, $admin, &$lines, &$updated) {
+        DB::transaction(function () use ($games, $batch, $post, $single, $admin, &$lines, &$updated, &$freed) {
             foreach ($games as $g) {
                 $players = $g['players'] ?? [];
                 unset($g['players']);
@@ -243,6 +277,9 @@ class AdminHandler
                         'source_text' => $single ? $post : $existing->source_text,
                     ], fn ($v) => $v !== null));
                     [$add, $rem] = $this->bookings->syncPostPlayers($existing, $players, $admin);
+                    if ($rem > 0 || $g['capacity'] > $existing->getOriginal('capacity')) {
+                        $freed[] = $existing;
+                    }
                     $fresh = $existing->fresh();
                     $updated[] = "#{$fresh->id} {$fresh->label()} · {$fresh->confirmedPlayers()}/{$fresh->capacity} confirmed · {$fresh->spotsLeft()} left"
                         .($add || $rem ? " (+{$add} / -{$rem} from your list)" : '');
@@ -259,6 +296,9 @@ class AdminHandler
 
         if ($updated) {
             $this->reply($admin, "🔄 Updated from your list:\n".implode("\n", $updated));
+        }
+        foreach ($freed as $game) {
+            $this->roster->offerFreedSpots($game);
         }
         if ($lines) {
             $this->messenger->buttons(
