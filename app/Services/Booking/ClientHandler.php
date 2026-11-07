@@ -22,6 +22,11 @@ class ClientHandler
 
     public function handle(Contact $contact, InboundMessage $inbound, Message $logged): void
     {
+        // "bot off": stay silent for clients. Admins in #test mode still get answers so they can try things.
+        if (\App\Services\BotSwitch::isOff() && ! $contact->isAdmin()) {
+            return;
+        }
+
         if ($inbound->type === 'text' && ($optReply = $this->reminders->handleOptCommand($contact, (string) $inbound->text)) !== null) {
             $this->messenger->text($contact->fresh(), $optReply);
 

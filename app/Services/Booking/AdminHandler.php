@@ -16,6 +16,7 @@ use Illuminate\Support\Str;
 class AdminHandler
 {
     public const HELP = "FootballLab bot · admin commands\n"
+        ."• bot off / bot on / bot status → pause or restart the bot for all clients\n"
         ."• After you publish, I send who to invite (asked for that day / usual day / no game in 3+ days) . You text them from the phone; I take over when they reply. Again anytime: invite N\n"
         ."• players → the player sheet (CSV for Excel)\n"
         ."• Spot frees up in a full game → I ask you to offer it to the next on the waiting list (or: offer N / skip N)\n"
@@ -53,6 +54,12 @@ class AdminHandler
 
         $text = trim((string) $inbound->text);
         $lower = mb_strtolower($text);
+
+        if (preg_match('/^bot\s+(off|stop|on|start|status)$/i', $text, $m)) {
+            $this->botSwitch($admin, mb_strtolower($m[1]));
+
+            return;
+        }
 
         if (str_starts_with($lower, '#test')) {
             $admin->update(['act_as_client' => ! $admin->act_as_client]);
@@ -198,6 +205,38 @@ class AdminHandler
         $this->reply($admin, $this->payments->attachLink($booking, rtrim($url, '.,)'), $admin));
 
         return true;
+    }
+
+    private function botSwitch(Contact $admin, string $action): void
+    {
+        $others = array_filter($this->messenger->adminContacts(), fn (Contact $a) => $a->wa_id !== $admin->wa_id);
+
+        if (in_array($action, ['off', 'stop'], true)) {
+            \App\Services\BotSwitch::turnOff($admin->wa_id);
+            $this->reply($admin, "⏸ Bot is OFF. Clients get no automatic replies and no timed messages; answer them from the WhatsApp app.\n"
+                .'Admin commands still work. Send "bot on" to restart.');
+            foreach ($others as $o) {
+                $this->messenger->alertAdmin($o, "⏸ Bot turned OFF by {$admin->adminName()}. Clients get no automatic replies until someone sends \"bot on\".");
+            }
+
+            return;
+        }
+
+        if (in_array($action, ['on', 'start'], true)) {
+            \App\Services\BotSwitch::turnOn();
+            $this->reply($admin, '▶️ Bot is ON. It answers new client messages again (messages sent while it was off are not answered automatically).');
+            foreach ($others as $o) {
+                $this->messenger->alertAdmin($o, "▶️ Bot turned ON by {$admin->adminName()}.");
+            }
+
+            return;
+        }
+
+        $info = \App\Services\BotSwitch::offInfo();
+        $this->reply($admin, $info
+            ? '⏸ Bot is OFF since '.\Carbon\Carbon::parse($info['at'])->setTimezone(config('fbl.timezone'))->format('D j M, g:i A')
+                .' (by '.(Contact::where('wa_id', $info['by'])->first()?->adminName() ?? '+'.$info['by']).'). Send "bot on" to restart.'
+            : '▶️ Bot is ON and answering clients. Send "bot off" to pause it.');
     }
 
     private function handleButton(Contact $admin, string $id): void

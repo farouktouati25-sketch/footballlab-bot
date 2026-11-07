@@ -14,6 +14,12 @@ class BookingHousekeeping extends Command
 
     public function handle(Messenger $messenger, \App\Services\Payments\PaymentService $payments): int
     {
+        if (\App\Services\BotSwitch::isOff()) {
+            $this->info('Bot is off (admin sent "bot off"): skipping timed messages.');
+
+            return self::SUCCESS;
+        }
+
         // 0) Catch any Ziina payments whose webhook was missed, before releasing holds.
         $payments->reconcile();
 
