@@ -203,6 +203,10 @@ class WhatsAppClient
 
     private function messagesUrl(): string
     {
+        if ($this->isYCloud()) {
+            return 'https://api.ycloud.com/v2/whatsapp/messages/sendDirectly';
+        }
+
         return $this->is360() ? $this->path('messages') : $this->path($this->phoneNumberId.'/messages');
     }
 
