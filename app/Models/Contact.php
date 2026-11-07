@@ -8,7 +8,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 class Contact extends Model
 {
     protected $fillable = [
-        'wa_id', 'name', 'last_inbound_at', 'bot_paused_until', 'act_as_client', 'first_referral', 'source',
+        'wa_id', 'name', 'last_inbound_at', 'bot_paused_until', 'act_as_client', 'first_referral', 'source', 'reminders_opted_out_at',
     ];
 
     protected function casts(): array
@@ -16,6 +16,7 @@ class Contact extends Model
         return [
             'last_inbound_at' => 'datetime',
             'bot_paused_until' => 'datetime',
+            'reminders_opted_out_at' => 'datetime',
             'act_as_client' => 'boolean',
             'first_referral' => 'array',
         ];

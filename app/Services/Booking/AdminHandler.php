@@ -295,8 +295,10 @@ class AdminHandler
         }
 
         $notified = $games->sum(fn (Game $g) => $this->roster->notifyWaitlist($g->fresh()));
+        $reminded = $games->sum(fn (Game $g) => app(\App\Services\Booking\ReminderService::class)->notifyForGame($g->fresh()));
         $this->reply($admin, "✅ {$count} game(s) published. The bot is taking bookings."
-            .($notified ? " Told {$notified} waitlisted player(s)." : ''));
+            .($notified ? " Told {$notified} waitlisted player(s)." : '')
+            .($reminded ? " Reminded {$reminded} player(s) who asked for that day or played last week." : ''));
     }
 
     private function addPlayer(Contact $admin, int $gameId, string $name, int $players): void

@@ -19,11 +19,13 @@ class ApprovalNotifier
         $game = $booking->game;
         $client = $booking->contact;
         $spotsAfter = $game->confirmedPlayers() + $booking->players;
-        $proof = $booking->payment_verified
+        $proof = $booking->wantsCash() && ! $booking->payment_proof_media_id && ! $booking->payment_verified
+            ? '💵 wants to PAY CASH ON THE SPOT (not paid yet). Confirm = you accept cash'
+            : ($booking->payment_verified
             ? 'PAID online via Ziina ✅ (verified)'
             : ($booking->payment_proof_media_id
             ? 'screenshot attached'
-            : 'client says paid, NO screenshot'.($booking->payment_note ? ' ('.$booking->payment_note.')' : ''));
+            : 'client says paid, NO screenshot'.($booking->payment_note ? ' ('.$booking->payment_note.')' : '')));
 
         $summary = "🆕 Booking {$booking->reference} needs your OK\n"
             ."👤 {$booking->player_name} · +{$client->wa_id}\n"
@@ -33,7 +35,7 @@ class ApprovalNotifier
             ."📊 After confirming: {$spotsAfter}/{$game->capacity}";
 
         $buttons = [
-            'approve:'.$booking->id => '✅ Confirm',
+            'approve:'.$booking->id => $booking->wantsCash() && ! $booking->payment_proof_media_id ? '✅ Accept cash' : '✅ Confirm',
             'reject:'.$booking->id => '❌ Reject',
         ];
 
@@ -73,8 +75,9 @@ class ApprovalNotifier
             $this->messenger->updateClient($client, $booking->reference,
                 "✅ You're in, {$booking->player_name}! Booking {$booking->reference} is confirmed.\n"
                 ."⚽ {$game->label()}\n"
-                ."👥 {$booking->players} player(s)\n\n"
-                ."Please arrive 10 minutes early. See you on the pitch!"
+                ."👥 {$booking->players} player(s)\n"
+                .($booking->wantsCash() && ! $booking->payment_proof_media_id && ! $booking->payment_verified ? "💵 Bring {$booking->amountLabel()} cash, pay on the spot\n" : '')
+                ."\nCome 10 min early. See you on the pitch 🔥"
                 .($groupLink ? "\n\nGame updates are posted in our group: {$groupLink}" : '')
             );
         } else {

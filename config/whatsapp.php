@@ -54,6 +54,7 @@ return [
         'admin_alert' => env('TEMPLATE_ADMIN_ALERT', 'admin_alert'),
         'client_update' => env('TEMPLATE_CLIENT_UPDATE', 'booking_update'),
         'waitlist_opened' => env('TEMPLATE_WAITLIST_OPENED', 'waitlist_game_opened'),
+        'game_reminder' => env('TEMPLATE_GAME_REMINDER', 'game_reminder'),
     ],
 
     // Safety margin: treat the 24h window as closed a bit early.

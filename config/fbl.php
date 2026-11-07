@@ -68,6 +68,16 @@ return [
     // After every confirm/add/remove, send admins the game's list ready to paste in the group.
     'auto_share_list' => (bool) env('FBL_AUTO_SHARE_LIST', true),
 
+    // Message people who asked for a day / played that weekday last week when its game is published.
+    'reminders' => [
+        'enabled' => (bool) env('FBL_REMINDERS', true),
+    ],
+
+    // Text(s) of the WhatsApp Business app greeting/away message, separated by "||". Echoes that start
+    // with one of these are automatic, so they don't pause the bot. Repeated canned first-contact
+    // messages are detected automatically too; this just makes it certain from the very first lead.
+    'auto_reply_texts' => array_values(array_filter(array_map('trim', explode('||', (string) env('FBL_AUTO_REPLY_TEXTS', ''))))),
+
     // Ping admins when a full game's waitlist reaches these sizes (suggests opening a second game).
     'waitlist_alert_at' => [1, 4, 8],
 

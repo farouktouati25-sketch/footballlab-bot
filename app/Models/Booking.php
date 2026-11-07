@@ -10,6 +10,14 @@ class Booking extends Model
 {
     public const OPEN_STATUSES = ['pending_payment', 'awaiting_approval', 'confirmed'];
 
+    /** payment_note marker: client asked to pay cash at the pitch (not paid yet). */
+    public const CASH_NOTE = 'CASH on the spot';
+
+    public function wantsCash(): bool
+    {
+        return str_starts_with((string) $this->payment_note, self::CASH_NOTE);
+    }
+
     protected $fillable = [
         'reference', 'contact_id', 'source', 'game_id', 'player_name', 'players', 'amount', 'status',
         'payment_intent_id', 'payment_url', 'link_requested_at', 'link_sent_by', 'payment_verified', 'paid_at', 'payment_proof_media_id', 'payment_proof_mime', 'payment_note', 'payment_reported_at', 'decided_by', 'decided_at', 'admin_reminded_at',

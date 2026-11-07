@@ -16,6 +16,7 @@ class AgentTools
         private readonly Messenger $messenger,
         private readonly \App\Services\Booking\RosterService $roster,
         private readonly \App\Services\Payments\PaymentService $payments,
+        private readonly \App\Services\Booking\ReminderService $reminders,
     ) {}
 
     public static function definitions(): array
@@ -52,6 +53,14 @@ class AgentTools
                 ],
             ],
             [
+                'name' => 'pay_cash_on_spot',
+                'description' => 'ONLY when the client themselves says they want to pay on the spot / pay cash at the pitch. Never offer cash yourself. Sends the booking to the team, who decide whether to accept cash.',
+                'input_schema' => [
+                    'type' => 'object',
+                    'properties' => ['booking_reference' => ['type' => 'string']],
+                ],
+            ],
+            [
                 'name' => 'join_waitlist',
                 'description' => 'Put the client on the waitlist for a FULL game (spots_left = 0). When the team opens another game that day, the client is messaged automatically.',
                 'input_schema' => [
@@ -61,6 +70,18 @@ class AgentTools
                         'players' => ['type' => 'integer', 'minimum' => 1],
                     ],
                     'required' => ['game_id', 'players'],
+                ],
+            ],
+            [
+                'name' => 'remember_availability',
+                'description' => 'The client wants to play on a day that has no published game yet (or no games are published at all). Saves the date; when the game for that day is posted they get a message automatically. Resolve phrases like "next Friday" to a date using the current Dubai date.',
+                'input_schema' => [
+                    'type' => 'object',
+                    'properties' => [
+                        'date' => ['type' => 'string', 'description' => 'YYYY-MM-DD'],
+                        'players' => ['type' => 'integer', 'minimum' => 1],
+                    ],
+                    'required' => ['date'],
                 ],
             ],
             [
@@ -95,7 +116,9 @@ class AgentTools
             'list_games' => $this->listGames(),
             'create_booking' => $this->createBooking($contact, $input),
             'report_payment' => $this->reportPayment($contact, $input),
+            'pay_cash_on_spot' => $this->payCash($contact, $input),
             'my_bookings' => $this->myBookings($contact),
+            'remember_availability' => $this->reminders->remember($contact, (string) ($input['date'] ?? ''), (int) ($input['players'] ?? 1)),
             'join_waitlist' => $this->joinWaitlist($contact, $input),
             'cancel_booking' => $this->cancelBooking($contact, $input),
             'handoff_to_human' => $this->handoff($contact, $input),
@@ -109,7 +132,7 @@ class AgentTools
         if ($games->isEmpty()) {
             return [
                 'games' => [],
-                'note' => 'No games are published right now. Tell the client the schedule is announced in the community group and share the group link.',
+                'note' => 'No games are published right now. Ask which day they want to play; when they name a day, call remember_availability so they get a message when that game is posted. You can also share the community group link.',
             ];
         }
 
@@ -176,6 +199,17 @@ class AgentTools
 
         return ['ok' => true, 'booking_reference' => $booking->reference, 'status' => 'awaiting_approval',
             'instructions' => 'Tell the client the team is checking the payment and will confirm here shortly.'];
+    }
+
+    private function payCash(Contact $contact, array $input): array
+    {
+        $result = $this->reportPayment($contact, ['booking_reference' => $input['booking_reference'] ?? '', 'note' => Booking::CASH_NOTE]);
+        if (isset($result['error'])) {
+            return $result;
+        }
+
+        return ['ok' => true, 'booking_reference' => $result['booking_reference'],
+            'instructions' => 'Tell the client you asked the team if cash on the spot is OK and they will confirm here shortly. Do not promise it is accepted.'];
     }
 
     private function joinWaitlist(Contact $contact, array $input): array

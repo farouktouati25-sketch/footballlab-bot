@@ -121,19 +121,54 @@ class WhatsAppWebhookController extends Controller
 
         $contact = Contact::firstOrCreate(['wa_id' => $to]);
         $type = (string) ($echo['type'] ?? 'text');
+        $body = $echo['text']['body'] ?? null;
+        $automatic = $this->isAutoReply($contact, $body);
 
         Message::create([
             'contact_id' => $contact->id,
             'direction' => 'out',
             'author' => 'human',
             'type' => $type,
-            'body' => $echo['text']['body'] ?? '['.$type.' sent by team]',
+            'body' => $body ?? '['.$type.' sent by team]',
             'wa_message_id' => $id ?: null,
-            'payload' => ['echo' => true],
+            'payload' => ['echo' => true, 'auto' => $automatic],
         ]);
+
+        if ($automatic) {
+            return; // the Business app's greeting/away message: the bot still answers right after it
+        }
 
         // The team took over this chat: keep the bot quiet for a while.
         $contact->update(['bot_paused_until' => now()->addHours((int) config('fbl.human_takeover_hours', 12))]);
+    }
+
+    /**
+     * Greeting/away messages from the WhatsApp Business app come back as echoes too.
+     * Treat an echo as automatic when it matches a configured auto-reply text, or when it is a
+     * canned text already sent word-for-word to another contact AND this chat has no earlier
+     * outgoing message in 14 days (that's when the greeting fires). Quick replies in an active chat
+     * still count as the team taking over.
+     */
+    private function isAutoReply(Contact $contact, ?string $body): bool
+    {
+        $body = trim((string) $body);
+        if ($body === '') {
+            return false;
+        }
+        foreach (config('fbl.auto_reply_texts', []) as $prefix) {
+            if (str_starts_with(mb_strtolower($body), mb_strtolower(mb_substr($prefix, 0, 60)))) {
+                return true;
+            }
+        }
+
+        $hadOutbound = Message::where('contact_id', $contact->id)->where('direction', 'out')
+            ->where('created_at', '>', now()->subDays(14))->exists();
+        if ($hadOutbound) {
+            return false;
+        }
+
+        return Message::where('direction', 'out')->where('author', 'human')->where('contact_id', '!=', $contact->id)
+            ->where('body', $body)->where('created_at', '>', now()->subDays(60))->exists();
     }
 
     private function signatureIsValid(Request $request): bool

@@ -17,10 +17,17 @@ class ClientHandler
         private readonly BookingService $bookings,
         private readonly Messenger $messenger,
         private readonly WhatsAppClient $whatsapp,
+        private readonly ReminderService $reminders,
     ) {}
 
     public function handle(Contact $contact, InboundMessage $inbound, Message $logged): void
     {
+        if ($inbound->type === 'text' && ($optReply = $this->reminders->handleOptCommand($contact, (string) $inbound->text)) !== null) {
+            $this->messenger->text($contact->fresh(), $optReply);
+
+            return;
+        }
+
         if ($contact->botIsPaused()) {
             return; // a human owns this chat right now
         }
