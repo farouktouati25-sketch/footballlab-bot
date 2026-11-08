@@ -55,10 +55,10 @@ class WeeklySchedule
         if (Game::where('weekly_key', $key)->where('starts_at', $startsAt)->exists()) {
             return null;
         }
+        // Any game already set for that evening (any venue, ±2h) replaces the fixed slot that week.
         $posted = Game::where('status', '!=', 'cancelled')
             ->whereBetween('starts_at', [$startsAt->copy()->subHours(2), $startsAt->copy()->addHours(2)])
-            ->get()
-            ->first(fn (Game $g) => Game::sameVenue($g->venue, $slot['venue']));
+            ->exists();
         if ($posted) {
             return null;
         }

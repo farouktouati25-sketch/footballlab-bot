@@ -60,8 +60,13 @@ class WeeklyScheduleTest extends TestCase
         Game::create(['starts_at' => Carbon::parse('2026-11-09 21:00', 'Asia/Dubai')->utc(), 'venue' => 'AL SAFA SPORTS HALL',
             'price' => 53, 'capacity' => 14, 'status' => 'published']);
 
+        // This Friday is already set at another pitch, 21:20.
+        Game::create(['starts_at' => Carbon::parse('2026-11-13 21:20', 'Asia/Dubai')->utc(), 'venue' => 'North London Collegiate School - Nad Al Sheba 1',
+            'price' => 58, 'capacity' => 14, 'status' => 'published']);
+
         $created = collect(app(WeeklySchedule::class)->generate());
         $this->assertFalse($created->contains(fn (Game $g) => $this->local($g) === 'Mon 2026-11-09 21:00'));
+        $this->assertFalse($created->contains(fn (Game $g) => $this->local($g) === 'Fri 2026-11-13 21:00'));
     }
 
     public function test_asks_admins_the_format_the_day_before_and_publishes_on_tap(): void
