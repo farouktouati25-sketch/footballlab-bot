@@ -39,11 +39,12 @@ class BotSwitchTest extends TestCase
         Http::assertSent(fn (Request $r) => ($r->data()['to'] ?? null) === self::ADMIN_2
             && str_contains($r->data()['text']['body'] ?? '', 'Bot turned OFF'));
 
+        $readsBefore = $this->readCount();
         $this->whatsapp(self::CLIENT, 'Hi, any games tonight?');
         Http::assertNotSent(fn (Request $r) => str_contains($r->url(), 'anthropic'));
         Http::assertNotSent(fn (Request $r) => ($r->data()['to'] ?? null) === self::CLIENT);
-        // no blue ticks while off
-        Http::assertNotSent(fn (Request $r) => ($r->data()['status'] ?? null) === 'read');
+        // no blue ticks for the client while off (admin messages may still be marked read)
+        $this->assertSame($readsBefore, $this->readCount());
 
         $this->artisan('bookings:housekeeping')->assertSuccessful();
 
@@ -54,10 +55,16 @@ class BotSwitchTest extends TestCase
         $this->whatsapp(self::ADMIN_1, 'bot on');
         $this->assertFalse(BotSwitch::isOff());
 
+        $readsBefore = $this->readCount();
         $this->whatsapp(self::CLIENT, 'Hello again');
-        Http::assertSent(fn (Request $r) => ($r->data()['status'] ?? null) === 'read');
+        $this->assertSame($readsBefore + 1, $this->readCount());
         Http::assertSent(fn (Request $r) => ($r->data()['to'] ?? null) === self::CLIENT
             && ($r->data()['text']['body'] ?? null) === 'Welcome to Football Lab ⚽');
+    }
+
+    private function readCount(): int
+    {
+        return Http::recorded(fn (Request $r) => ($r->data()['status'] ?? null) === 'read')->count();
     }
 
     private function whatsapp(string $from, string $text): void
