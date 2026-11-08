@@ -449,22 +449,63 @@ class AdminHandler
         $freed = [];
         $single = count($games) === 1; // your post is reused as the list layout only when it's about one game
 
-        DB::transaction(function () use ($games, $batch, $post, $single, $admin, &$lines, &$updated, &$freed) {
-            foreach ($games as $g) {
+        // A post with several games (Game 1 / Game 2 lists): remember which list belongs to which game,
+        // matching names first, then the order of the games in the post.
+        $group = $single ? null : (string) Str::uuid();
+        $parts = [];
+        if (! $single) {
+            $blockNames = RosterService::blockNames($post);
+            $free = array_keys($blockNames);
+            foreach ($games as $k => $g) {
+                $mine = array_map(fn ($n) => mb_strtolower(trim((string) $n)), (array) ($g['players'] ?? []));
+                $best = null;
+                $bestScore = 0;
+                foreach ($free as $b) {
+                    $score = count(array_intersect($mine, $blockNames[$b]));
+                    if ($score > $bestScore) {
+                        [$best, $bestScore] = [$b, $score];
+                    }
+                }
+                $parts[$k] = $best;
+                if ($best !== null) {
+                    $free = array_values(array_diff($free, [$best]));
+                }
+            }
+            foreach ($games as $k => $g) {
+                $parts[$k] ??= array_shift($free);
+            }
+        }
+
+        DB::transaction(function () use ($games, $batch, $post, $single, $admin, $group, $parts, &$lines, &$updated, &$freed) {
+            $usedExisting = [];
+            foreach ($games as $k => $g) {
                 $players = $g['players'] ?? [];
                 unset($g['players']);
+                $listMeta = $single ? [] : ['source_text' => $post, 'list_group' => $group, 'list_part' => $parts[$k] ?? null];
 
                 // Same game already live? Then this post is an updated list: sync it instead of creating a duplicate.
-                $existing = Game::where('starts_at', $g['starts_at'])
+                // Two games at the same time and place (Game 1 / Game 2): each list goes to its own game.
+                $candidates = Game::where('starts_at', $g['starts_at'])
                     ->where(fn ($q) => $q->where('status', 'published')
                         ->orWhere(fn ($q) => $q->where('status', 'draft')->whereNotNull('weekly_key')))
+                    ->orderBy('id')
                     ->get()
-                    ->first(fn (Game $e) => $this->sameVenue($e->venue, $g['venue']));
+                    ->filter(fn (Game $e) => $this->sameVenue($e->venue, $g['venue']))
+                    ->values();
+                $free = $candidates->reject(fn (Game $e) => in_array($e->id, $usedExisting, true));
+                $part = $parts[$k] ?? null;
+                $byPosition = $part !== null ? $candidates->get($part) : null; // Game 1 = first added, Game 2 = second…
+                $existing = $free->first(fn (Game $e) => $e->list_part !== null && $e->list_part === $part)
+                    ?? ($byPosition && ! in_array($byPosition->id, $usedExisting, true) ? $byPosition : null)
+                    ?? $free->first();
+                if ($existing) {
+                    $usedExisting[] = $existing->id;
+                }
 
                 if ($existing) {
                     // A weekly game still waiting for its format: your post decides it and opens it.
                     $publishWeekly = $existing->status === 'draft';
-                    $existing->update(array_filter([
+                    $existing->update($listMeta + array_filter([
                         'capacity' => $g['capacity'],
                         'source_text' => $single ? $post : $existing->source_text,
                         'format' => $publishWeekly ? ($g['format'] ?? null) : null,
@@ -482,7 +523,7 @@ class AdminHandler
                     continue;
                 }
 
-                $game = Game::create($g + ['status' => 'draft', 'batch_id' => $batch, 'source_text' => $single ? $post : null]);
+                $game = Game::create($listMeta + $g + ['status' => 'draft', 'batch_id' => $batch, 'source_text' => $single ? $post : null]);
                 $this->bookings->syncPostPlayers($game, $players, $admin);
                 $lines[] = "#{$game->id} {$game->label()} · ".(float) $game->price.' '.config('fbl.currency')
                     ." · {$game->confirmedPlayers()}/{$game->capacity} already in · {$game->spotsLeft()} left";

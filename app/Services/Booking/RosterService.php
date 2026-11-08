@@ -70,55 +70,114 @@ class RosterService
      * Re-use the admin's own group post: same header, emojis and footer, only the numbered
      * player slots (and empty waiting-list slots) are filled. Null if the post has no numbered list.
      */
-    public function fillTemplate(Game $game): ?string
-    {
-        $lines = preg_split('/\r\n|\n|\r/', (string) $game->source_text);
-        $slot = '/^(\s*)(\d{1,2})(\s*[.)\-]\s*)(.*)$/u';
+    private const SLOT = '/^(\s*)(\d{1,2})(\s*[.)\-]\s*)(.*)$/u';
 
-        // The main list: the first run of lines numbered 1, 2, 3… before any "waiting" heading.
-        $main = [];
+    /**
+     * Numbered player lists in a post (before any "waiting" heading): each list restarts at 1.
+     *
+     * @return array{blocks: array<int, int[]>, waitingAt: ?int, lines: string[]}  blocks = line indexes per list
+     */
+    public static function listBlocks(string $text): array
+    {
+        $lines = preg_split('/\r\n|\n|\r/', $text);
+        $blocks = [];
         $waitingAt = null;
         foreach ($lines as $i => $line) {
             if (preg_match('/wait/iu', $line)) {
                 $waitingAt = $i;
                 break;
             }
-            if (preg_match($slot, $line, $m) && (int) $m[2] === count($main) + 1) {
-                $main[] = $i;
-            } elseif (preg_match($slot, $line) && $main === []) {
+            if (! preg_match(self::SLOT, $line, $m)) {
                 continue;
             }
-        }
-        if (count($main) < 2) {
-            return null;
+            $n = (int) $m[2];
+            if ($n === 1) {
+                $blocks[] = [$i];
+            } elseif ($blocks && $n === count($blocks[array_key_last($blocks)]) + 1) {
+                $blocks[array_key_last($blocks)][] = $i;
+            }
         }
 
-        $names = $this->names($game, full: true)->all();
+        return ['blocks' => array_values(array_filter($blocks, fn ($b) => count($b) >= 2)), 'waitingAt' => $waitingAt, 'lines' => $lines];
+    }
+
+    /** Names written in each list of a post (lower-cased, empty slots skipped). */
+    public static function blockNames(string $text): array
+    {
+        $parsed = self::listBlocks($text);
+
+        return array_map(function ($block) use ($parsed) {
+            $names = [];
+            foreach ($block as $i) {
+                preg_match(self::SLOT, $parsed['lines'][$i], $m);
+                $n = mb_strtolower(trim($m[4] ?? ''));
+                if ($n !== '') {
+                    $names[] = $n;
+                }
+            }
+
+            return $names;
+        }, $parsed['blocks']);
+    }
+
+    /**
+     * The admin's own post with the current names. A post with several games (Game 1 / Game 2 lists)
+     * gets every list refreshed from its own game, so it can be pasted back into the group as is.
+     */
+    public function fillTemplate(Game $game): ?string
+    {
+        $parsed = self::listBlocks((string) $game->source_text);
+        $blocks = $parsed['blocks'];
+        $lines = $parsed['lines'];
+        $waitingAt = $parsed['waitingAt'];
+        if (! $blocks) {
+            return null;
+        }
+        $slot = self::SLOT;
+
+        $owners = [];
+        if ($game->list_group) {
+            foreach (Game::where('list_group', $game->list_group)->where('status', '!=', 'cancelled')->get() as $g) {
+                $owners[(int) $g->list_part] = $g;
+            }
+        }
+        $owners[(int) $game->list_part] = $game;
+
         $render = function (string $line, ?string $name) use ($slot) {
             preg_match($slot, $line, $m);
 
             return $name === null || $name === '' ? rtrim($m[1].$m[2].$m[3]) : $m[1].$m[2].rtrim($m[3]).' '.$name;
         };
 
-        foreach ($main as $k => $i) {
-            $lines[$i] = $render($lines[$i], $names[$k] ?? null);
-        }
-        // More players than slots (admin added extra by hand): continue the numbering.
-        $extra = [];
-        for ($k = count($main); $k < count($names); $k++) {
-            preg_match($slot, $lines[end($main)], $m);
-            $extra[] = $m[1].($k + 1).rtrim($m[3]).' '.$names[$k];
-        }
-        if ($extra) {
-            array_splice($lines, end($main) + 1, 0, $extra);
-            if ($waitingAt !== null) {
-                $waitingAt += count($extra);
+        // Last list first, so lines added to one list don't shift the ones above it.
+        for ($b = count($blocks) - 1; $b >= 0; $b--) {
+            $owner = $owners[$b] ?? null;
+            if (! $owner) {
+                continue;
+            }
+            $main = $blocks[$b];
+            $names = $this->names($owner, full: true)->all();
+            foreach ($main as $k => $i) {
+                $lines[$i] = $render($lines[$i], $names[$k] ?? null);
+            }
+            // More players than slots (admin added extra by hand): continue the numbering.
+            $extra = [];
+            for ($k = count($main); $k < count($names); $k++) {
+                preg_match($slot, $lines[end($main)], $m);
+                $extra[] = $m[1].($k + 1).rtrim($m[3]).' '.$names[$k];
+            }
+            if ($extra) {
+                array_splice($lines, end($main) + 1, 0, $extra);
+                if ($waitingAt !== null && $waitingAt > end($main)) {
+                    $waitingAt += count($extra);
+                }
             }
         }
 
         // Waiting list: fill its empty numbered slots with people waiting through the bot.
         if ($waitingAt !== null) {
-            $waiting = $game->waitlist()->with('contact')->orderBy('id')->get()
+            $waiting = \App\Models\WaitlistEntry::whereIn('game_id', array_map(fn (Game $g) => $g->id, $owners))
+                ->with('contact')->orderBy('id')->get()
                 ->map(fn ($w) => trim(($w->contact?->name ?: 'Player').($w->players > 1 ? ' +'.($w->players - 1) : '')))
                 ->values()->all();
             $w = 0;

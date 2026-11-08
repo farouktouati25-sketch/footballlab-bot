@@ -9,7 +9,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 class Game extends Model
 {
     protected $fillable = [
-        'starts_at', 'venue', 'format', 'price', 'capacity', 'payment_link', 'notes', 'status', 'batch_id', 'source_text', 'weekly_key', 'format_asked_at',
+        'starts_at', 'venue', 'format', 'price', 'capacity', 'payment_link', 'notes', 'status', 'batch_id', 'source_text', 'weekly_key', 'format_asked_at', 'list_group', 'list_part',
     ];
 
     protected function casts(): array
@@ -87,7 +87,17 @@ class Game extends Model
     public function label(): string
     {
         $label = $this->localStart()->format('D j M, g:i A').' · '.$this->venue;
+        $label = $this->format ? $label.' ('.$this->format.')' : $label;
 
-        return $this->format ? $label.' ('.$this->format.')' : $label;
+        // Two games at the same time and place: "Game 1" / "Game 2" (in the order they were added).
+        if ($this->exists && $this->starts_at) {
+            $twins = static::where('starts_at', $this->starts_at)->where('status', '!=', 'cancelled')->orderBy('id')->get(['id', 'venue'])
+                ->filter(fn (Game $g) => static::sameVenue($g->venue, $this->venue))->pluck('id')->values();
+            if ($twins->count() > 1) {
+                $label .= ' · Game '.($twins->search($this->id) + 1);
+            }
+        }
+
+        return $label;
     }
 }
