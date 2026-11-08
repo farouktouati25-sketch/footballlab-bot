@@ -198,8 +198,8 @@ class WhatsAppWebhookController extends Controller
             return;
         }
 
-        // The team took over this chat: keep the bot quiet for a while.
-        $contact->update(['bot_paused_until' => now()->addHours((int) config('fbl.human_takeover_hours', 12))]);
+        // The team took over this chat: keep the bot quiet for a while, and stop the hand-off reminders.
+        $contact->update(['bot_paused_until' => now()->addHours((int) config('fbl.human_takeover_hours', 12)), 'handoff_at' => null]);
     }
 
     /**

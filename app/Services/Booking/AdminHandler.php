@@ -32,6 +32,7 @@ class AdminHandler
         ."• Payment link: reply to my 💳 request with the link (or send FBL-XXXXX https://…)\n"
         ."• confirm FBL-XXXXX / reject FBL-XXXXX\n"
         ."• suggest 12 → game not filling up? I invite people who played in the last 3 days or on the same weekday (myself if they chatted in the last 24h, otherwise I list them for you)\n"
+        ."• chats → conversations waiting for you (I remind you after 15 min and 1 h until you reply)\n"
         ."• cancel game 12 → stop bookings for a game\n"
         ."• edit 12 format 8v8 / edit 12 price 60 / edit 12 spots 16 → change a game (format also opens a weekly game)\n"
         ."• pause 9715… / resume 9715… → bot off/on for a client\n"
@@ -181,8 +182,16 @@ class AdminHandler
         if (preg_match('/^(pause|resume)\s+\+?(\d{8,15})$/i', $text, $m)) {
             $client = Contact::firstOrCreate(['wa_id' => $m[2]]);
             $pause = mb_strtolower($m[1]) === 'pause';
-            $client->update(['bot_paused_until' => $pause ? now()->addHours((int) config('fbl.human_takeover_hours', 12)) : null]);
+            $client->update(['bot_paused_until' => $pause ? now()->addHours((int) config('fbl.human_takeover_hours', 12)) : null] + ($pause ? [] : ['handoff_at' => null]));
             $this->reply($admin, $pause ? "Bot paused for +{$m[2]}." : "Bot active again for +{$m[2]}.");
+
+            return;
+        }
+
+        if ($lower === 'chats') {
+            $open = Contact::whereNotNull('handoff_at')->orderBy('handoff_at')->get();
+            $this->reply($admin, $open->isEmpty() ? 'No chats waiting for you 👍' : "🙋 Chats waiting for you:\n".$open->map(fn (Contact $c) =>
+                "• {$c->displayName()} (+{$c->wa_id}) · {$c->handoff_reason} · ".$c->handoff_at->diffForHumans())->implode("\n"));
 
             return;
         }

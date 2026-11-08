@@ -9,6 +9,7 @@ class Contact extends Model
 {
     protected $fillable = [
         'wa_id', 'name', 'last_inbound_at', 'bot_paused_until', 'act_as_client', 'first_referral', 'source', 'reminders_opted_out_at', 'player_name', 'preferred_days',
+        'handoff_at', 'handoff_reason', 'handoff_reminders',
     ];
 
     protected function casts(): array
@@ -17,6 +18,8 @@ class Contact extends Model
             'last_inbound_at' => 'datetime',
             'bot_paused_until' => 'datetime',
             'reminders_opted_out_at' => 'datetime',
+            'handoff_at' => 'datetime',
+            'handoff_reminders' => 'integer',
             'preferred_days' => 'array',
             'act_as_client' => 'boolean',
             'first_referral' => 'array',

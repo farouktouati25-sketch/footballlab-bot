@@ -65,6 +65,22 @@ class BookingHousekeeping extends Command
             ->get()
             ->each(fn ($game) => $roster->offerFreedSpots($game));
 
+        // 2b) Chats the bot handed to the team that nobody has answered yet: remind at 15 min and 1 h.
+        \App\Models\Contact::whereNotNull('handoff_at')->get()->each(function (\App\Models\Contact $c) use ($messenger) {
+            $due = [15, 60][$c->handoff_reminders] ?? null;
+            if ($due === null || $c->handoff_at->gt(now()->subMinutes($due))) {
+                return;
+            }
+            $waiting = $c->handoff_at->diffForHumans(now(), \Carbon\CarbonInterface::DIFF_ABSOLUTE);
+            $more = $c->messages()->where('direction', 'in')->where('created_at', '>', $c->handoff_at)->count();
+            foreach ($messenger->adminContacts() as $admin) {
+                $messenger->alertAdmin($admin, "⏰ Still waiting for you ({$waiting}): {$c->displayName()} (+{$c->wa_id}) · {$c->handoff_reason}"
+                    .($more ? " · sent {$more} more message(s)" : '')
+                    .'. Reply from the WhatsApp app, or send "resume '.$c->wa_id.'" to let the bot answer again.');
+            }
+            $c->update(['handoff_reminders' => $c->handoff_reminders + 1]);
+        });
+
         // 2a) Clients waiting 15+ min for a payment link: one nudge to admins.
         $noLink = Booking::where('status', 'pending_payment')->whereNull('payment_url')
             ->whereNotNull('link_requested_at')->whereNull('admin_reminded_at')

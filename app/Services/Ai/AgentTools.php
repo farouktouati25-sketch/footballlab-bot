@@ -120,7 +120,7 @@ class AgentTools
             ],
             [
                 'name' => 'handoff_to_human',
-                'description' => 'Silently pass the chat to the team (the client gets no reply from you; the admins answer): refunds, complaints, private pitch bookings, tournaments, corporate events, groups larger than the booking limit, anything you cannot answer from the facts, or when the client asks for a person. The bot stops replying in this chat afterwards.',
+                'description' => 'Silently pass the chat to the team (the client gets no reply from you; the admins answer and get reminded until they do): someone wants to bring a whole team or a group (a match against us, a team booking, a big group of friends), refunds, complaints, private pitch bookings, tournaments, corporate events, anything you cannot answer from the facts, anything you are not sure about, or when the client asks for a person. The bot stops replying in this chat afterwards.',
                 'input_schema' => [
                     'type' => 'object',
                     'properties' => ['reason' => ['type' => 'string']],
@@ -323,7 +323,10 @@ class AgentTools
     private function handoff(Contact $contact, array $input): array
     {
         $reason = (string) ($input['reason'] ?? 'Client needs a person');
-        $contact->update(['bot_paused_until' => now()->addHours((int) config('fbl.human_takeover_hours', 12))]);
+        $contact->update([
+            'bot_paused_until' => now()->addHours((int) config('fbl.human_takeover_hours', 12)),
+            'handoff_at' => now(), 'handoff_reason' => mb_substr($reason, 0, 250), 'handoff_reminders' => 0,
+        ]);
 
         $last = (string) $contact->messages()->where('direction', 'in')->latest('id')->value('body');
         foreach ($this->messenger->adminContacts() as $admin) {
