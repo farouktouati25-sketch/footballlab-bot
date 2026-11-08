@@ -123,21 +123,118 @@ class ReminderService
         return $listed;
     }
 
+    /**
+     * Admin asked "suggest 12" for a game that isn't filling up. Candidates:
+     *  - played in the last 3 days, or
+     *  - played on the same weekday before (last 60 days),
+     *  - plus anyone who asked for that day / usually plays that day.
+     * Anyone who chatted with the bot in the last 24h gets the invite straight from the bot
+     * (WhatsApp only allows free messages inside that window); everyone else goes on a list
+     * for the admin to message from the phone.
+     *
+     * @return array{direct:int, manual:int, names:string[]}
+     */
+    public function suggestForGame(Game $game, Contact $admin): array
+    {
+        $tz = config('fbl.timezone');
+        $local = $game->localStart();
+        $day = $local->toDateString();
+
+        $played = Booking::where('bookings.status', 'confirmed')
+            ->join('games', 'games.id', '=', 'bookings.game_id')
+            ->where('games.status', '!=', 'cancelled')
+            ->where('games.id', '!=', $game->id)
+            ->where('games.starts_at', '<', now())
+            ->where('games.starts_at', '>', now()->subDays((int) config('fbl.reminders.lookback_days', 60)))
+            ->get(['bookings.contact_id', 'bookings.player_name', 'games.starts_at']);
+
+        $recipients = [];   // contact_id => reason
+        $noNumber = [];     // names from your group lists (no phone saved)
+        foreach ($played as $row) {
+            $at = Carbon::parse($row->starts_at, 'UTC');
+            $reason = $at->gt(now()->subDays(3)) ? 'recent'
+                : ($at->copy()->setTimezone($tz)->dayOfWeek === $local->dayOfWeek ? 'same_day' : null);
+            if (! $reason) {
+                continue;
+            }
+            if ($row->contact_id) {
+                // "recent" beats "same_day"
+                if (($recipients[$row->contact_id] ?? null) !== 'recent') {
+                    $recipients[$row->contact_id] = $reason;
+                }
+            } else {
+                $noNumber[mb_strtolower(trim($row->player_name))] = trim($row->player_name);
+            }
+        }
+        AvailabilityRequest::where('play_date', $day)->pluck('contact_id')
+            ->each(function ($id) use (&$recipients) { $recipients[$id] = 'asked'; });
+        Contact::whereNotNull('preferred_days')->get(['id', 'preferred_days'])
+            ->filter(fn (Contact $c) => in_array($local->dayOfWeek, array_map('intval', (array) $c->preferred_days), true))
+            ->each(function (Contact $c) use (&$recipients) { $recipients[$c->id] ??= 'usual_day'; });
+
+        // Not the people already in that day, and not names already on this game's list.
+        $busy = $this->busyOn($day);
+        $inGame = $game->bookings()->whereIn('status', ['pending_payment', 'awaiting_approval', 'confirmed'])
+            ->pluck('player_name')->map(fn ($n) => mb_strtolower(trim((string) $n)))->all();
+        foreach ($inGame as $n) {
+            unset($noNumber[$n]);
+        }
+
+        $direct = 0;
+        $manual = 0;
+        $contacts = Contact::whereIn('id', array_keys($recipients))->whereNull('reminders_opted_out_at')->get();
+        foreach ($contacts as $contact) {
+            if ($contact->isAdmin() || in_array($contact->id, $busy, true)) {
+                continue;
+            }
+
+            $row = DB::table('game_reminders')->where('contact_id', $contact->id)->where('play_date', $day)->first();
+            if ($row && $row->status === 'sent') {
+                continue; // already invited for that day
+            }
+
+            $canMessage = $contact->windowIsOpen() && ! $contact->botIsPaused();
+            $sent = $canMessage && $this->messenger->text($contact, $this->inviteText($game, $contact));
+            $values = ['game_id' => $game->id, 'reason' => $recipients[$contact->id], 'status' => $sent ? 'sent' : 'manual',
+                'sent' => $sent, 'updated_at' => now()];
+            $row
+                ? DB::table('game_reminders')->where('id', $row->id)->update($values)
+                : DB::table('game_reminders')->insert($values + ['contact_id' => $contact->id, 'play_date' => $day, 'created_at' => now()]);
+            $sent ? $direct++ : $manual++;
+        }
+
+        $this->sendInviteList($game, $admin, $direct, array_values($noNumber));
+
+        return ['direct' => $direct, 'manual' => $manual, 'names' => array_values($noNumber)];
+    }
+
+    private function inviteText(Game $game, Contact $contact): string
+    {
+        $first = trim((string) ($contact->player_name ?: $contact->name));
+        $first = $first !== '' ? ' '.(preg_split('/\s+/u', $first)[0] ?? '') : '';
+        $local = $game->localStart();
+        $when = $local->isToday() ? 'tonight' : ($local->isTomorrow() ? 'tomorrow' : $local->format('l'));
+
+        return "Hey{$first} 👋 we've got a ".($game->format ? $game->format.' ' : '')."game {$when} at {$local->format('g:i A')}, {$game->venue}. "
+            .'Spots still open, want in? ⚽';
+    }
+
     /** The list + a message the admin can copy and send from the phone. */
-    public function sendInviteList(Game $game, ?Contact $only = null): bool
+    public function sendInviteList(Game $game, ?Contact $only = null, ?int $directNow = null, array $namesWithoutNumber = []): bool
     {
         $rows = DB::table('game_reminders')->where('game_id', $game->id)->whereIn('status', ['manual', 'sent'])->get();
-        $rank = ['asked' => 0, 'usual_day' => 1, 'same_day' => 2, 'lapsed' => 3];
-        $rows = $rows->sortBy(fn ($r) => [$rank[$r->reason] ?? 9, $r->id])->values();
+        $rank = ['asked' => 0, 'usual_day' => 1, 'recent' => 2, 'same_day' => 3, 'lapsed' => 4];
+        $rows = $rows->sortBy(fn ($r) => [$r->status === 'sent' ? 1 : 0, $rank[$r->reason] ?? 9, $r->id])->values();
+        $extra = $namesWithoutNumber ? "\n\nAlso played recently (from your group lists, no number saved): ".implode(', ', $namesWithoutNumber) : '';
         if ($rows->isEmpty()) {
             if ($only) {
-                $this->messenger->alertAdmin($only, "Nobody to invite for #{$game->id} right now.");
+                $this->messenger->alertAdmin($only, "Nobody to invite for #{$game->id} right now.".$extra);
             }
 
             return false;
         }
 
-        $why = ['asked' => 'asked for this day', 'usual_day' => 'usually free this day', 'same_day' => 'played this weekday before', 'lapsed' => 'hasn\'t played lately'];
+        $why = ['asked' => 'asked for this day', 'usual_day' => 'usually free this day', 'recent' => 'played in the last 3 days', 'same_day' => 'played this weekday before', 'lapsed' => 'hasn\'t played lately'];
         $lines = $rows->map(function ($r, $i) use ($why) {
             $c = Contact::find($r->contact_id);
 
@@ -149,7 +246,8 @@ class ReminderService
         foreach ($only ? [$only] : $this->messenger->adminContacts() as $admin) {
             $ok = $this->messenger->alertAdmin($admin,
                 "📣 Players to invite for #{$game->id} ({$game->label()}):\n\n{$lines}\n\n"
-                ."Message them from the phone. When they reply, I take over the chat and book them.") || $ok;
+                .($directNow !== null ? "✅ = I messaged them myself just now ({$directNow}). " : '')
+                ."Message the others from the phone. When they reply, I take over the chat and book them.".$extra) || $ok;
         }
 
         return $ok;

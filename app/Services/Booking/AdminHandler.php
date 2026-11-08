@@ -31,6 +31,7 @@ class AdminHandler
         ."• pending → bookings waiting for your OK\n"
         ."• Payment link: reply to my 💳 request with the link (or send FBL-XXXXX https://…)\n"
         ."• confirm FBL-XXXXX / reject FBL-XXXXX\n"
+        ."• suggest 12 → game not filling up? I invite people who played in the last 3 days or on the same weekday (myself if they chatted in the last 24h, otherwise I list them for you)\n"
         ."• cancel game 12 → stop bookings for a game\n"
         ."• edit 12 format 8v8 / edit 12 price 60 / edit 12 spots 16 → change a game (format also opens a weekly game)\n"
         ."• pause 9715… / resume 9715… → bot off/on for a client\n"
@@ -86,6 +87,17 @@ class AdminHandler
             $booking
                 ? $this->decide($admin, $booking->id, mb_strtolower($m[1]) !== 'reject')
                 : $this->reply($admin, 'No booking '.Str::upper($m[2]).'.');
+
+            return;
+        }
+
+        if (preg_match('/^suggest\s+(\d+)$/i', $text, $m)) {
+            $game = Game::find((int) $m[1]);
+            if (! $game || $game->status !== 'published' || $game->starts_at->isPast()) {
+                $this->reply($admin, "No open upcoming game #{$m[1]}.");
+            } else {
+                app(\App\Services\Booking\ReminderService::class)->suggestForGame($game, $admin);
+            }
 
             return;
         }
