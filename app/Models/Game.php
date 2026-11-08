@@ -32,7 +32,7 @@ class Game extends Model
         return $this->hasMany(WaitlistEntry::class);
     }
 
-    /** Loose venue match ("AL SAFA SPORTS HALL" = "Al Safa Sports Ground, Nad Al Sheba"). */
+    /** Loose venue match ("AL SAFA SPORTS HALL" = "Al Safa Sports Ground"). */
     public static function sameVenue(string $a, string $b): bool
     {
         $words = fn (string $s) => array_filter(preg_split('/[^a-z0-9]+/', mb_strtolower($s)), fn ($w) => strlen($w) > 3

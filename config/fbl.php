@@ -10,7 +10,7 @@ return [
         'price_from' => (int) env('FBL_PRICE_FROM', 50),
         'venues' => array_values(array_filter(array_map('trim', explode('|', (string) env(
             'FBL_VENUES',
-            'Dubai Schools Al Barsha|Al Safa Sports Ground, Nad Al Sheba'
+            'Dubai Schools Al Barsha|Al Safa Sports Ground'
         ))))),
         'group_link' => env('FBL_GROUP_LINK', 'https://chat.whatsapp.com/BIJG7gpzJWIDLD6UsYZPHR'),
         'membership' => 'No membership, no commitment: players book only the games they want.',
@@ -48,10 +48,10 @@ return [
     // Fixed weekly games, created automatically "weekly_days_ahead" days in advance.
     // "choices" = format decided each week: the bot asks admins the day before at "format_question_at".
     'weekly' => [
-        ['day' => 'monday', 'time' => '21:00', 'venue' => 'Al Safa Sports Ground, Nad Al Sheba', 'format' => '7v7'],
+        ['day' => 'monday', 'time' => '21:00', 'venue' => 'Al Safa Sports Ground', 'format' => '7v7'],
         ['day' => 'tuesday', 'time' => '21:00', 'venue' => 'Dubai Schools Al Barsha', 'choices' => ['11v11', '8v8', 'tournament']],
-        ['day' => 'wednesday', 'time' => '21:00', 'venue' => 'Al Safa Sports Ground, Nad Al Sheba', 'format' => '7v7'],
-        ['day' => 'thursday', 'time' => '21:00', 'venue' => 'Al Safa Sports Ground, Nad Al Sheba', 'format' => '7v7'],
+        ['day' => 'wednesday', 'time' => '21:00', 'venue' => 'Al Safa Sports Ground', 'format' => '7v7'],
+        ['day' => 'thursday', 'time' => '21:00', 'venue' => 'Al Safa Sports Ground', 'format' => '7v7'],
         ['day' => 'friday', 'time' => '21:00', 'venue' => 'Dubai Schools Al Barsha', 'choices' => ['11v11', '8v8']],
         ['day' => 'saturday', 'time' => '20:00', 'venue' => 'Dubai Schools Al Barsha', 'format' => '11v11'],
         ['day' => 'sunday', 'time' => '20:00', 'venue' => 'Dubai Schools Al Barsha', 'format' => '11v11'],
