@@ -34,6 +34,34 @@ return [
         'payment_link' => env('FBL_DEFAULT_PAYMENT_LINK'),
     ],
 
+    // Price and spots per format. A venue rule (matched on part of the venue name) overrides the format.
+    'formats' => [
+        '7v7' => ['price' => 53, 'capacity' => 14],
+        '8v8' => ['price' => 53, 'capacity' => 16],
+        '11v11' => ['price' => 58, 'capacity' => 22],
+        'tournament' => ['price' => 58, 'capacity' => 22], // adjust per tournament with "edit 12 price 70"
+    ],
+    'venue_pricing' => [
+        'north london collegiate' => ['price' => 58, 'capacity' => 14], // Nad Al Sheba pitch
+    ],
+
+    // Fixed weekly games, created automatically "weekly_days_ahead" days in advance.
+    // "choices" = format decided each week: the bot asks admins the day before at "format_question_at".
+    'weekly' => [
+        ['day' => 'monday', 'time' => '21:00', 'venue' => 'Al Safa Sports Ground, Nad Al Sheba', 'format' => '7v7'],
+        ['day' => 'tuesday', 'time' => '21:00', 'venue' => 'Dubai Schools Al Barsha', 'choices' => ['11v11', '8v8', 'tournament']],
+        ['day' => 'wednesday', 'time' => '21:00', 'venue' => 'Al Safa Sports Ground, Nad Al Sheba', 'format' => '7v7'],
+        ['day' => 'thursday', 'time' => '21:00', 'venue' => 'Al Safa Sports Ground, Nad Al Sheba', 'format' => '7v7'],
+        ['day' => 'friday', 'time' => '21:00', 'venue' => 'Dubai Schools Al Barsha', 'choices' => ['11v11', '8v8']],
+        ['day' => 'saturday', 'time' => '20:00', 'venue' => 'Dubai Schools Al Barsha', 'format' => '11v11'],
+        ['day' => 'sunday', 'time' => '20:00', 'venue' => 'Dubai Schools Al Barsha', 'format' => '11v11'],
+    ],
+    'weekly_days_ahead' => (int) env('FBL_WEEKLY_DAYS_AHEAD', 7),
+    'format_question_at' => env('FBL_FORMAT_QUESTION_AT', '12:00'),
+
+    // Players reserve anytime; the payment link goes out the day before the game at this time (Dubai).
+    'payment_link_day_before_at' => env('FBL_PAYMENT_LINK_AT', '12:00'),
+
     // Online payments. With a Ziina API token, every booking gets its own pay link for the exact
     // amount (price × players), and payment is confirmed automatically by Ziina's webhook.
     'payments' => [

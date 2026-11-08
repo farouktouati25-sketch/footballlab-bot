@@ -9,7 +9,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 class Game extends Model
 {
     protected $fillable = [
-        'starts_at', 'venue', 'format', 'price', 'capacity', 'payment_link', 'notes', 'status', 'batch_id', 'source_text',
+        'starts_at', 'venue', 'format', 'price', 'capacity', 'payment_link', 'notes', 'status', 'batch_id', 'source_text', 'weekly_key', 'format_asked_at',
     ];
 
     protected function casts(): array
@@ -18,6 +18,7 @@ class Game extends Model
             'starts_at' => 'datetime',
             'price' => 'decimal:2',
             'capacity' => 'integer',
+            'format_asked_at' => 'datetime',
         ];
     }
 
@@ -29,6 +30,15 @@ class Game extends Model
     public function waitlist(): HasMany
     {
         return $this->hasMany(WaitlistEntry::class);
+    }
+
+    /** Loose venue match ("AL SAFA SPORTS HALL" = "Al Safa Sports Ground, Nad Al Sheba"). */
+    public static function sameVenue(string $a, string $b): bool
+    {
+        $words = fn (string $s) => array_filter(preg_split('/[^a-z0-9]+/', mb_strtolower($s)), fn ($w) => strlen($w) > 3
+            && ! in_array($w, ['sports', 'ground', 'dubai', 'school', 'schools', 'pitch', 'field'], true));
+
+        return (bool) array_intersect($words($a), $words($b)) || mb_strtolower($a) === mb_strtolower($b);
     }
 
     public function scopeUpcoming(Builder $query): Builder

@@ -27,6 +27,16 @@ class PaymentService
             return $booking->payment_url;
         }
 
+        // Spot is reserved now; the payment link goes out the day before the game.
+        $due = $this->linkDueAt($booking);
+        if ($due->isFuture()) {
+            if (! $booking->link_due_at) {
+                $booking->update(['link_due_at' => $due]);
+            }
+
+            return null;
+        }
+
         $mode = config('fbl.payments.mode', 'admin_link');
 
         if ($mode === 'admin_link') {
@@ -58,6 +68,44 @@ class PaymentService
         $booking->update(['payment_intent_id' => $intent['id'], 'payment_url' => $intent['url']]);
 
         return $intent['url'];
+    }
+
+    /** Day before the game at payment_link_day_before_at (Dubai time). */
+    public function linkDueAt(Booking $booking): \Carbon\Carbon
+    {
+        $at = (string) config('fbl.payment_link_day_before_at', '12:00');
+        if ($at === '') {
+            return now()->subSecond(); // deferral switched off: link right away
+        }
+        $tz = config('fbl.timezone');
+        $day = $booking->game->starts_at->copy()->setTimezone($tz)->subDay()->toDateString();
+
+        return \Carbon\Carbon::createFromFormat('!Y-m-d H:i', $day.' '.$at, $tz)->utc();
+    }
+
+    /** Reserved bookings whose link day has come: request (admin_link) or send the link. */
+    public function releaseDueLinks(): int
+    {
+        $count = 0;
+        Booking::where('status', 'pending_payment')->whereNull('payment_url')->whereNull('link_requested_at')
+            ->whereNotNull('link_due_at')->where('link_due_at', '<=', now())
+            ->with(['game', 'contact'])
+            ->get()
+            ->each(function (Booking $b) use (&$count) {
+                $link = $this->linkFor($b);
+                if ($link && ! $b->fresh()->payment_url) {
+                    $b->forceFill(['payment_url' => $link, 'created_at' => now()])->save(); // hold timer starts now
+                }
+                if ($link && $b->contact) {
+                    $minutes = (int) config('fbl.payment_timeout_minutes', 120);
+                    $this->messenger->updateClient($b->contact, $b->reference,
+                        "⚽ {$b->game->label()} is tomorrow! Here's your payment link for {$b->reference} ({$b->amountLabel()}):\n{$link}\n\n"
+                        ."Please pay within {$minutes} minutes to keep your spot, then send the screenshot here ✅");
+                }
+                $count++;
+            });
+
+        return $count;
     }
 
     /** Ask admins to reply with a payment link for this booking (once). */

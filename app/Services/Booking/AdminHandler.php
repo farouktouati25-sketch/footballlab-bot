@@ -32,6 +32,7 @@ class AdminHandler
         ."• Payment link: reply to my 💳 request with the link (or send FBL-XXXXX https://…)\n"
         ."• confirm FBL-XXXXX / reject FBL-XXXXX\n"
         ."• cancel game 12 → stop bookings for a game\n"
+        ."• edit 12 format 8v8 / edit 12 price 60 / edit 12 spots 16 → change a game (format also opens a weekly game)\n"
         ."• pause 9715… / resume 9715… → bot off/on for a client\n"
         ."• #test → chat with the bot as a client (send #test again to exit)";
 
@@ -153,6 +154,12 @@ class AdminHandler
             return;
         }
 
+        if (preg_match('/^edit\s+(\d+)\s+(format|price|spots)\s+(\S+)$/i', $text, $m)) {
+            $this->editGame($admin, (int) $m[1], mb_strtolower($m[2]), $m[3]);
+
+            return;
+        }
+
         if (preg_match('/^cancel\s+game\s+(\d+)$/i', $text, $m)) {
             $this->cancelGame($admin, (int) $m[1]);
 
@@ -239,6 +246,66 @@ class AdminHandler
             : '▶️ Bot is ON and answering clients. Send "bot off" to pause it.');
     }
 
+    private function pickFormat(Contact $admin, string $ref): void
+    {
+        [$gameId, $format] = array_pad(explode(':', $ref, 2), 2, '');
+        $game = Game::find((int) $gameId);
+        if (! $game || $game->status === 'cancelled') {
+            $this->reply($admin, 'That game no longer exists.');
+
+            return;
+        }
+        if ($game->format && $game->status === 'published') {
+            $this->reply($admin, "#{$game->id} is already set to {$game->format}. To change it: edit {$game->id} format …");
+
+            return;
+        }
+
+        $this->reply($admin, app(WeeklySchedule::class)->setFormat($game, $format, $admin));
+    }
+
+    private function editGame(Contact $admin, int $gameId, string $field, string $value): void
+    {
+        $game = Game::find($gameId);
+        if (! $game || $game->status === 'cancelled') {
+            $this->reply($admin, "No open game #{$gameId}.");
+
+            return;
+        }
+
+        if ($field === 'format') {
+            $this->reply($admin, app(WeeklySchedule::class)->setFormat($game, $value, $admin));
+
+            return;
+        }
+
+        $number = (float) str_replace(',', '.', $value);
+        if ($number <= 0) {
+            $this->reply($admin, 'Use a number, e.g. edit '.$gameId.' '.$field.' '.($field === 'price' ? '60' : '16'));
+
+            return;
+        }
+
+        if ($field === 'spots') {
+            $taken = $game->spotsTaken();
+            if ((int) $number < $game->confirmedPlayers()) {
+                $this->reply($admin, "#{$game->id} already has {$game->confirmedPlayers()} confirmed players. Can't go below that.");
+
+                return;
+            }
+            $game->update(['capacity' => (int) $number]);
+            if ((int) $number > $taken) {
+                $this->roster->offerFreedSpots($game->fresh());
+            }
+        } else {
+            $game->update(['price' => $number]);
+        }
+
+        $g = $game->fresh();
+        $this->reply($admin, "✅ #{$g->id} {$g->label()} · ".(float) $g->price.' '.config('fbl.currency')." · {$g->capacity} spots · {$g->spotsLeft()} left"
+            .($field === 'price' ? ' (new bookings only; existing ones keep their amount)' : ''));
+    }
+
     private function handleButton(Contact $admin, string $id): void
     {
         [$action, $ref] = array_pad(explode(':', $id, 2), 2, '');
@@ -250,6 +317,7 @@ class AdminHandler
             'discard' => $this->publishBatch($admin, $ref, false),
             'wl_send' => $this->waitlistAnswer($admin, (int) $ref, true),
             'wl_skip' => $this->waitlistAnswer($admin, (int) $ref, false),
+            'fmt' => $this->pickFormat($admin, $ref),
             default => $this->reply($admin, self::HELP),
         };
     }
@@ -366,13 +434,21 @@ class AdminHandler
                 unset($g['players']);
 
                 // Same game already live? Then this post is an updated list: sync it instead of creating a duplicate.
-                $existing = Game::where('starts_at', $g['starts_at'])->where('status', 'published')->get()
+                $existing = Game::where('starts_at', $g['starts_at'])
+                    ->where(fn ($q) => $q->where('status', 'published')
+                        ->orWhere(fn ($q) => $q->where('status', 'draft')->whereNotNull('weekly_key')))
+                    ->get()
                     ->first(fn (Game $e) => $this->sameVenue($e->venue, $g['venue']));
 
                 if ($existing) {
+                    // A weekly game still waiting for its format: your post decides it and opens it.
+                    $publishWeekly = $existing->status === 'draft';
                     $existing->update(array_filter([
                         'capacity' => $g['capacity'],
                         'source_text' => $single ? $post : $existing->source_text,
+                        'format' => $publishWeekly ? ($g['format'] ?? null) : null,
+                        'price' => $publishWeekly ? $g['price'] : null,
+                        'status' => $publishWeekly ? 'published' : null,
                     ], fn ($v) => $v !== null));
                     [$add, $rem] = $this->bookings->syncPostPlayers($existing, $players, $admin);
                     if ($rem > 0 || $g['capacity'] > $existing->getOriginal('capacity')) {
@@ -409,10 +485,7 @@ class AdminHandler
 
     private function sameVenue(string $a, string $b): bool
     {
-        $words = fn (string $s) => array_filter(preg_split('/[^a-z0-9]+/', mb_strtolower($s)), fn ($w) => strlen($w) > 3
-            && ! in_array($w, ['sports', 'ground', 'dubai', 'school', 'schools', 'pitch', 'field'], true));
-
-        return (bool) array_intersect($words($a), $words($b)) || mb_strtolower($a) === mb_strtolower($b);
+        return Game::sameVenue($a, $b);
     }
 
     private function publishBatch(Contact $admin, string $batch, bool $publish): void

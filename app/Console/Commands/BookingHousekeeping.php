@@ -23,6 +23,9 @@ class BookingHousekeeping extends Command
         // 0) Catch any Ziina payments whose webhook was missed, before releasing holds.
         $payments->reconcile();
 
+        // 0b) Day-before payment links for spots reserved in advance.
+        $payments->releaseDueLinks();
+
         $cutoff = now()->subMinutes((int) config('fbl.payment_timeout_minutes', 120));
 
         // 1) Unpaid holds past the timeout free their spots.
@@ -31,12 +34,17 @@ class BookingHousekeeping extends Command
         Booking::where('status', 'pending_payment')
             ->where('payment_verified', false)
             ->where(fn ($q) => $q->where(fn ($q) => $q->whereNotNull('payment_url')->where('created_at', '<=', $cutoff))
-                ->orWhere(fn ($q) => $q->whereNull('payment_url')->where('created_at', '<=', now()->subHours(12))))
+                // waiting for the admin's link for 12h+ (reserved-in-advance spots only count once their link is due)
+                ->orWhere(fn ($q) => $q->whereNull('payment_url')
+                    ->where(fn ($q) => $q->whereNull('link_due_at')->orWhere('link_due_at', '<=', now()))
+                    ->whereRaw('COALESCE(link_requested_at, created_at) <= ?', [now()->subHours(12)])))
             ->lazyById(200)
             ->each(function (Booking $booking) use ($messenger, $cutoff) {
                 $expired = Booking::whereKey($booking->id)
                     ->where('status', 'pending_payment')
-                    ->where('created_at', '<=', $booking->payment_url ? $cutoff : now()->subHours(12))
+                    ->when($booking->payment_url,
+                        fn ($q) => $q->where('created_at', '<=', $cutoff),
+                        fn ($q) => $q->whereRaw('COALESCE(link_requested_at, created_at) <= ?', [now()->subHours(12)]))
                     ->update(['status' => 'expired']);
                 if ($expired === 0) {
                     return;

@@ -184,6 +184,17 @@ class AgentTools
 
         $booking = $result['booking'];
         $link = $this->payments->linkFor($booking);
+        $booking = $booking->fresh(['game']);
+        if (! $link && $booking->link_due_at && $booking->link_due_at->isFuture()) {
+            return [
+                'booking_reference' => $booking->reference,
+                'game' => $booking->game->label(),
+                'players' => $booking->players,
+                'amount' => $booking->amountLabel(),
+                'payment_link_comes' => $booking->link_due_at->copy()->setTimezone(config('fbl.timezone'))->format('l j M, g:i A'),
+                'instructions' => 'Spot reserved, nothing to pay now. Tell them in one friendly line: they\'re on the list, the reference, and that the payment link comes here the day before the game (payment_link_comes) to confirm the spot.',
+            ];
+        }
         $online = (bool) $booking->fresh()->payment_intent_id;
 
         return [

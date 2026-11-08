@@ -21,7 +21,7 @@ class Booking extends Model
 
     protected $fillable = [
         'reference', 'contact_id', 'source', 'game_id', 'player_name', 'players', 'amount', 'status',
-        'payment_intent_id', 'payment_url', 'link_requested_at', 'link_sent_by', 'payment_verified', 'paid_at', 'payment_proof_media_id', 'payment_proof_mime', 'payment_note', 'payment_reported_at', 'decided_by', 'decided_at', 'admin_reminded_at',
+        'payment_intent_id', 'payment_url', 'link_requested_at', 'link_due_at', 'link_sent_by', 'payment_verified', 'paid_at', 'payment_proof_media_id', 'payment_proof_mime', 'payment_note', 'payment_reported_at', 'decided_by', 'decided_at', 'admin_reminded_at',
     ];
 
     protected function casts(): array
@@ -33,6 +33,7 @@ class Booking extends Model
             'payment_verified' => 'boolean',
             'paid_at' => 'datetime',
             'link_requested_at' => 'datetime',
+            'link_due_at' => 'datetime',
             'decided_at' => 'datetime',
             'admin_reminded_at' => 'datetime',
         ];

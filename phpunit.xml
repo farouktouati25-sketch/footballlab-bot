@@ -35,6 +35,7 @@
         <env name="ADMIN_NUMBERS" value="971500000091,971500000092" force="true"/>
         <env name="ADMIN_NAMES" value="Farouk,Partner" force="true"/>
         <env name="ANTHROPIC_API_KEY" value="test-key" force="true"/>
+        <env name="FBL_PAYMENT_LINK_AT" value="" force="true"/>
         <env name="FBL_DEFAULT_PAYMENT_LINK" value="https://pay.example.com/fbl" force="true"/>
     </php>
 </phpunit>
