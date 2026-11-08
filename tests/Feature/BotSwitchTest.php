@@ -42,6 +42,8 @@ class BotSwitchTest extends TestCase
         $this->whatsapp(self::CLIENT, 'Hi, any games tonight?');
         Http::assertNotSent(fn (Request $r) => str_contains($r->url(), 'anthropic'));
         Http::assertNotSent(fn (Request $r) => ($r->data()['to'] ?? null) === self::CLIENT);
+        // no blue ticks while off
+        Http::assertNotSent(fn (Request $r) => ($r->data()['status'] ?? null) === 'read');
 
         $this->artisan('bookings:housekeeping')->assertSuccessful();
 
@@ -53,6 +55,7 @@ class BotSwitchTest extends TestCase
         $this->assertFalse(BotSwitch::isOff());
 
         $this->whatsapp(self::CLIENT, 'Hello again');
+        Http::assertSent(fn (Request $r) => ($r->data()['status'] ?? null) === 'read');
         Http::assertSent(fn (Request $r) => ($r->data()['to'] ?? null) === self::CLIENT
             && ($r->data()['text']['body'] ?? null) === 'Welcome to Football Lab ⚽');
     }

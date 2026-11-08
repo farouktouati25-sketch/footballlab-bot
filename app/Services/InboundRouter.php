@@ -83,10 +83,17 @@ class InboundRouter
         }
         $contact->refresh();
 
-        try {
-            $this->whatsapp->markRead($inbound->id);
-        } catch (\Throwable $e) {
-            Log::debug('markRead failed', ['error' => $e->getMessage()]);
+        // Blue ticks only when the bot will actually answer. When it's off, or a human owns the chat,
+        // leave the message unread so it stays unread in the WhatsApp Business app for the team.
+        $botWillAnswer = $message->author === 'admin'
+            || $contact->isAdmin()
+            || (! \App\Services\BotSwitch::isOff() && ! $contact->botIsPaused());
+        if ($botWillAnswer) {
+            try {
+                $this->whatsapp->markRead($inbound->id);
+            } catch (\Throwable $e) {
+                Log::debug('markRead failed', ['error' => $e->getMessage()]);
+            }
         }
 
         if ($inbound->type !== 'reaction') {
