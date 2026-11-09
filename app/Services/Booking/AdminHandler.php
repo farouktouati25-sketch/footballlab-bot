@@ -357,10 +357,16 @@ class AdminHandler
         $payments = app(\App\Services\Payments\PaymentService::class);
         $link = $payments->linkFor($b); // admin_link mode: asks you for the link (reply to that message)
 
-        if ($link && $b->contact) {
+        if ($b->contact) {
+            // The client always hears back: the first confirmation goes through the payment link.
             $minutes = (int) config('fbl.payment_timeout_minutes', 120);
-            $this->messenger->updateClient($b->contact, $b->reference,
-                "Booked ✅ {$b->game->label()}\n💰 {$b->amountLabel()}, pay here: {$link}\nSend the screenshot after paying 👊 (spot held {$minutes} min)");
+            $due = $b->fresh()->link_due_at;
+            $text = $link
+                ? "First time confirmation needs to go through the link 👊\n💰 {$b->amountLabel()}: {$link}\nSend the screenshot after paying (spot held {$minutes} min)"
+                : ($due && $due->isFuture()
+                    ? 'First time confirmation needs to go through the link 👊 Your spot is saved, I\'ll send you the link the day before the game.'
+                    : 'First time confirmation needs to go through the link 👊 I\'ll send it to you shortly to confirm your spot.');
+            $this->messenger->updateClient($b->contact, $b->reference, $text);
         }
         foreach ($this->messenger->adminContacts() as $other) {
             if ($other->wa_id !== $admin->wa_id) {

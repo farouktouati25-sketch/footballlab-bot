@@ -192,7 +192,7 @@ class AgentTools
                 'players' => $booking->players,
                 'amount' => $booking->amountLabel(),
                 'payment_link_comes' => $booking->link_due_at->copy()->setTimezone(config('fbl.timezone'))->format('l j M, g:i A'),
-                'instructions' => 'Spot reserved, nothing to pay now. Tell them in one friendly line: they\'re on the list, the reference, and that the payment link comes here the day before the game (payment_link_comes) to confirm the spot.',
+                'instructions' => 'Spot reserved, nothing to pay now. Reply in ONE short line, e.g. "Done ✅ I\'ll send you the link the day before the game to pay and confirm your spot." No reference, price or game details unless they ask.',
             ];
         }
         $online = (bool) $booking->fresh()->payment_intent_id;
@@ -205,7 +205,7 @@ class AgentTools
             'payment_link' => $link,
             'hold_minutes' => (int) config('fbl.payment_timeout_minutes', 120),
             'instructions' => ! $link && config('fbl.payments.mode') === 'admin_link'
-                ? 'A personal payment link is being prepared. Tell them in one friendly line: booked, the reference and amount, payment link coming in a moment, then pay and send the screenshot here. Never say you will check with the team. Do not invent a link.'
+                ? 'Reply in ONE short line: "Done ✅ I\'ll send you the link shortly to pay and confirm your spot." No reference or details unless they ask. Never say you will check with the team. Do not invent a link.'
                 : ($link
                 ? ($online
                     ? 'Send the amount and this personal payment link. Payment is detected automatically, so no screenshot is needed; the client gets a message here once paid. Spot is held for hold_minutes.'

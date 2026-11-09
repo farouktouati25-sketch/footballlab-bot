@@ -170,6 +170,9 @@ class RemindersTest extends TestCase
         $this->assertNotNull($booking->fresh()->link_requested_at);
         Http::assertSent(fn (Request $r) => ($r->data()['to'] ?? null) === '971500000091'
             && str_contains($r->data()['text']['body'] ?? '', 'needs a payment link'));
+        // …and the client is told the first confirmation goes through the link.
+        Http::assertSent(fn (Request $r) => ($r->data()['to'] ?? null) === '971500000001'
+            && str_contains($r->data()['text']['body'] ?? '', 'First time confirmation needs to go through the link'));
     }
 
     public function test_pay_later_approved_confirms_with_pay_after_game_note(): void
