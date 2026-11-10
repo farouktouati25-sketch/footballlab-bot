@@ -50,7 +50,8 @@ class UnknownClientTest extends TestCase
 
         // A second message doesn't ask again.
         $this->whatsapp(self::CLIENT, ['type' => 'text', 'text' => ['body' => 'Bro?']]);
-        $this->assertSame(1, Http::recorded(fn (Request $r) => str_contains(json_encode($r->data(), JSON_UNESCAPED_UNICODE), 'Do you know +'))->count());
+        $this->assertSame(1, Http::recorded(fn (Request $r) => ($r->data()['to'] ?? null) === self::ADMIN_1
+            && str_contains(json_encode($r->data(), JSON_UNESCAPED_UNICODE), 'Do you know +'))->count());
 
         // Admin taps "Old client": the bot answers right away as with a regular, offering cash or link.
         $this->whatsapp(self::ADMIN_1, ['type' => 'interactive', 'interactive' => ['type' => 'button_reply',
@@ -62,7 +63,7 @@ class UnknownClientTest extends TestCase
             && str_contains($r->data()['text']['body'] ?? '', 'Pay on the spot or by link'));
         $prompt = end($this->prompts);
         $this->assertStringContainsString('RETURNING player', $prompt);
-        $this->assertStringContainsString('PAYMENT CHOICE', $prompt);
+        $this->assertStringContainsString('this client may pay on the spot', $prompt);
     }
 
     public function test_old_client_paying_on_the_spot_is_booked_straight_away(): void
@@ -110,7 +111,7 @@ class UnknownClientTest extends TestCase
         $this->whatsapp(self::ADMIN_1, ['type' => 'text', 'text' => ['body' => 'new '.self::CLIENT]]);
         $this->assertSame('new', Contact::where('wa_id', self::CLIENT)->sole()->client_type);
         $this->assertStringContainsString('NEW LEAD', end($this->prompts));
-        $this->assertStringNotContainsString('PAYMENT CHOICE', end($this->prompts));
+        $this->assertStringNotContainsString('this client may pay on the spot', end($this->prompts));
     }
 
     private function whatsapp(string $from, array $message): void
