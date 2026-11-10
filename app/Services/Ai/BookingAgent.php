@@ -122,7 +122,9 @@ class BookingAgent
             $days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
             $name .= ' Usually free: '.implode(', ', array_map(fn ($d) => $days[(int) $d] ?? '', (array) $contact->preferred_days)).'.';
         }
-        $source = $contact->source === 'meta_ad' ? 'They came from one of our Instagram/Facebook ads.' : '';
+        $source = $contact->source === 'meta_ad'
+            ? 'They came from one of our Instagram/Facebook ads.'
+            : 'They did NOT tap one of our ads (no ad data on this chat).';
         $groupLink = $facts['group_link'];
         $stage = $this->isReturning($contact)
             ? <<<STAGE
@@ -132,7 +134,10 @@ WHO THIS IS: a RETURNING player (they've booked, chatted with the team, or messa
 - Don't list games or prices before they tell you the day. Then call list_games and offer the game(s) for that day only.
 STAGE
             : <<<STAGE
-WHO THIS IS: a NEW LEAD (first conversation with us, often from an ad). Don't sell yet: have a friendly chat and get them into the group.
+FIRST, CHECK WHO THIS REALLY IS. If they did NOT tap an ad and they go straight to playing ("add me for today", "any game tonight?", "book me", "I'm in", "put me on the list", a day or a game), they're an OLD CLIENT who knows us. Then ignore the new-lead steps below: no welcome speech, no "do you play often", no group link, don't ask if they played with us. Answer like a regular: go straight to the BOOKING FLOW (check list_games, ask only their name if you don't have it).
+Treat them as a new lead only if they came from an ad, or say they saw our ad / a post / heard about us, or ask what FootballLab is, how it works, or the price.
+
+WHO THIS IS: otherwise a NEW LEAD (first conversation with us, often from an ad). Don't sell yet: have a friendly chat and get them into the group.
 - Do NOT mention prices, payment, booking or upcoming games unless they ask about them directly. Don't call list_games or create_booking unless they ask for a specific game.
 - One short message at a time, one question per message, like a mate chatting:
 1. Welcome them like a person would ("Hey! Welcome to Football Lab ⚽"). If they ask what we are, say it casually in one or two lines, e.g. "We're a bunch of football lovers in Dubai, we play every week, all levels, you just show up and play 😄". Never sound like a brochure.
