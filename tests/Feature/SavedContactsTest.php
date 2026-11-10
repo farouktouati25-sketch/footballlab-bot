@@ -43,12 +43,14 @@ class SavedContactsTest extends TestCase
         Http::assertSent(fn (Request $r) => ($r->data()['to'] ?? null) === self::ADMIN_1
             && str_contains($r->data()['text']['body'] ?? '', '1 saved client'));
 
+        $reads = fn () => Http::recorded(fn (Request $r) => ($r->data()['status'] ?? null) === 'read')->count();
+        $readsBefore = $reads(); // the admin's own message gets blue ticks
         $this->whatsapp('971501112222', ['type' => 'text', 'text' => ['body' => 'Hey bro, any game tonight?']]);
 
         // No reply, no blue ticks, Claude not even asked.
         Http::assertNotSent(fn (Request $r) => ($r->data()['to'] ?? null) === '971501112222');
         Http::assertNotSent(fn (Request $r) => str_contains($r->url(), 'anthropic'));
-        Http::assertNotSent(fn (Request $r) => ($r->data()['status'] ?? null) === 'read');
+        $this->assertSame($readsBefore, $reads());
     }
 
     public function test_vcf_file_and_commands(): void
