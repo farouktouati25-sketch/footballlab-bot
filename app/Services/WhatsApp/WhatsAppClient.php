@@ -141,6 +141,26 @@ class WhatsAppClient
         }
     }
 
+    /** Raw bytes of an inbound file (e.g. a .vcf the admin sent), or null. */
+    public function downloadMedia(?string $mediaId, ?string $link = null): ?string
+    {
+        try {
+            if ($this->isYCloud()) {
+                return $link ? $this->http()->timeout(30)->get($link)->throw()->body() : null;
+            }
+            if (! $mediaId) {
+                return null;
+            }
+            $url = $this->http()->timeout(15)->get($this->path($mediaId))->throw()->json('url');
+
+            return $url ? $this->http()->timeout(30)->get($this->downloadUrl($url))->throw()->body() : null;
+        } catch (\Throwable $e) {
+            Log::warning('Media download failed', ['error' => $e->getMessage()]);
+
+            return null;
+        }
+    }
+
     /** Upload a file we generated (e.g. a CSV) so it can be sent as a document. Returns the media id. */
     public function uploadBytes(string $bytes, string $filename, string $mime): ?string
     {

@@ -36,6 +36,7 @@ class AdminHandler
         ."• cancel game 12 → stop bookings for a game\n"
         ."• edit 12 format 8v8 / edit 12 price 60 / edit 12 spots 16 → change a game (format also opens a weekly game)\n"
         ."• pause 9715… / resume 9715… → bot off/on for a client\n"
+        ."• Old clients: share their contact cards (or a .vcf) with me, or send saved 9715… → the bot never talks to them (unsave 9715… to undo)\n"
         ."• #test → chat with the bot as a client (send #test again to exit)";
 
     public function __construct(
@@ -51,6 +52,13 @@ class AdminHandler
     {
         if ($inbound->isButton()) {
             $this->handleButton($admin, (string) $inbound->buttonId);
+
+            return;
+        }
+
+        // Contact cards or a contacts file (.vcf) from the admin: those people are old clients, the bot leaves them alone.
+        if ($inbound->type === 'contacts' || $this->isVcf($inbound)) {
+            $this->importSavedContacts($admin, $inbound);
 
             return;
         }
@@ -184,6 +192,24 @@ class AdminHandler
             $pause = mb_strtolower($m[1]) === 'pause';
             $client->update(['bot_paused_until' => $pause ? now()->addHours((int) config('fbl.human_takeover_hours', 12)) : null] + ($pause ? [] : ['handoff_at' => null]));
             $this->reply($admin, $pause ? "Bot paused for +{$m[2]}." : "Bot active again for +{$m[2]}.");
+
+            return;
+        }
+
+        if (preg_match('/^(saved|known|unsave|unsaved|forget)\s+\+?([\d\s]{8,20})$/i', $text, $m)) {
+            $wa = \App\Support\Phone::normalize($m[2]);
+            $client = Contact::firstOrCreate(['wa_id' => $wa]);
+            $save = in_array(mb_strtolower($m[1]), ['saved', 'known'], true);
+            $client->update(['saved_at' => $save ? now() : null] + ($save ? ['handoff_at' => null] : []));
+            $this->reply($admin, $save
+                ? "📇 +{$wa} marked as a saved client: the bot won't reply to them or message them."
+                : "🤖 +{$wa} is handled by the bot again.");
+
+            return;
+        }
+
+        if ($lower === 'saved') {
+            $this->reply($admin, '📇 '.Contact::whereNotNull('saved_at')->count().' saved clients the bot leaves alone. Send contact cards or a .vcf file to add more.');
 
             return;
         }
@@ -565,6 +591,59 @@ class AdminHandler
                 ['publish:'.$batch => '✅ Publish', 'discard:'.$batch => '🗑 Discard']
             );
         }
+    }
+
+    private function isVcf(InboundMessage $inbound): bool
+    {
+        if ($inbound->type !== 'document') {
+            return false;
+        }
+        $name = mb_strtolower((string) ($inbound->raw['document']['filename'] ?? ''));
+
+        return str_ends_with($name, '.vcf') || in_array($inbound->mediaMime, ['text/vcard', 'text/x-vcard', 'text/directory'], true);
+    }
+
+    /** Mark every number in the shared contact cards / .vcf as a saved client. */
+    private function importSavedContacts(Contact $admin, InboundMessage $inbound): void
+    {
+        $numbers = [];
+        if ($inbound->type === 'contacts') {
+            foreach ((array) ($inbound->raw['contacts'] ?? []) as $card) {
+                foreach ((array) ($card['phones'] ?? []) as $phone) {
+                    $numbers[] = (string) ($phone['wa_id'] ?? $phone['phone'] ?? '');
+                }
+            }
+        } else {
+            $vcf = app(\App\Services\WhatsApp\WhatsAppClient::class)->downloadMedia($inbound->mediaId, $inbound->mediaLink);
+            if ($vcf === null) {
+                $this->reply($admin, "I couldn't open that contacts file. Try again, or share the contacts as contact cards.");
+
+                return;
+            }
+            $numbers = self::vcfNumbers($vcf);
+        }
+
+        $admins = array_map(fn (Contact $a) => $a->wa_id, $this->messenger->adminContacts());
+        $saved = 0;
+        foreach (array_unique(array_filter(array_map(fn ($n) => \App\Support\Phone::normalize($n), $numbers))) as $wa) {
+            if (strlen($wa) < 8 || in_array($wa, $admins, true) || $wa === ltrim((string) config('whatsapp.business_number'), '+')) {
+                continue;
+            }
+            Contact::updateOrCreate(['wa_id' => $wa], ['saved_at' => now()]);
+            $saved++;
+        }
+
+        $this->reply($admin, $saved
+            ? "📇 {$saved} saved client(s): the bot won't reply to them or message them. Undo one with: unsave 9715…"
+            : "I didn't find any phone numbers in that.");
+    }
+
+    /** @return string[] phone numbers in a vCard file */
+    public static function vcfNumbers(string $vcf): array
+    {
+        preg_match_all('/^(?:item\d+\.)?TEL[^:\r\n]*:(.+)$/mi', $vcf, $m);
+
+        return array_map('trim', $m[1] ?? []);
     }
 
     private function sameVenue(string $a, string $b): bool

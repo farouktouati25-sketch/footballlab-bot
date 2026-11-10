@@ -27,6 +27,10 @@ class ClientHandler
             return;
         }
 
+        if ($contact->isSaved()) {
+            return; // old client saved in the team's phone: humans answer, not the bot
+        }
+
         if ($inbound->type === 'text' && ($optReply = $this->reminders->handleOptCommand($contact, (string) $inbound->text)) !== null) {
             $this->messenger->text($contact->fresh(), $optReply);
 
