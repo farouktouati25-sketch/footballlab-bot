@@ -57,7 +57,7 @@ class AgentTools
             ],
             [
                 'name' => 'pay_later',
-                'description' => 'The client says they pay after the game, pay cash on the spot, or are used to paying later (old clients). Never offer this yourself. Books them pending the admins\' OK and stays silent: the client gets NO reply from you now. Pass game_id + player_name + players for a new booking, or booking_reference if they already have one.',
+                'description' => 'The client wants to pay on the spot / cash / after the game. Never offer this yourself unless the PAYMENT CHOICE rule says this client may pay on the spot: then they are booked straight away and you reply one short line. For everyone else it books them pending the admins\' OK and stays silent: the client gets NO reply from you now. Pass game_id + player_name + players for a new booking, or booking_reference if they already have one.',
                 'input_schema' => [
                     'type' => 'object',
                     'properties' => [
@@ -244,6 +244,10 @@ class AgentTools
                 ->when(! empty($input['game_id']), fn ($q) => $q->where('game_id', (int) $input['game_id']))
                 ->latest()->first();
 
+        if ($contact->canPayOnSpot()) {
+            return $this->bookPayOnSpot($contact, $booking, $input, $note);
+        }
+
         if (! $booking) {
             if (empty($input['game_id']) || empty($input['player_name'])) {
                 return ['error' => 'Need game_id and player_name (ask for the name if you don\'t know it).'];
@@ -262,6 +266,33 @@ class AgentTools
         $this->silent = true;
 
         return ['ok' => true, 'instructions' => 'Done. Do not reply to the client.'];
+    }
+
+    /** Old client paying on the spot: confirmed now, no approval, admins told. */
+    private function bookPayOnSpot(Contact $contact, ?Booking $booking, array $input, string $note): array
+    {
+        if (! $booking) {
+            if (empty($input['game_id']) || empty($input['player_name'])) {
+                return ['error' => 'Need game_id and player_name (ask for the name if you don\'t know it).'];
+            }
+            $result = $this->bookings->create($contact, (int) $input['game_id'], (string) $input['player_name'], (int) ($input['players'] ?? 1));
+            if (! $result['ok']) {
+                return ['error' => $result['error']];
+            }
+            $booking = $result['booking'];
+        }
+
+        $booking->update(['status' => 'confirmed', 'payment_note' => mb_substr($note, 0, 250), 'decided_by' => 'bot', 'decided_at' => now()]);
+        $b = $booking->fresh(['game']);
+        $game = $b->game;
+        foreach ($this->messenger->adminContacts() as $admin) {
+            $this->messenger->alertAdmin($admin, "💵 {$b->player_name} (+{$contact->wa_id}) booked {$game->label()} · pays on the spot ({$b->amountLabel()}) · "
+                ."{$game->confirmedPlayers()}/{$game->capacity} confirmed");
+        }
+        $this->roster->shareUpdated($game, "{$b->player_name} confirmed (pays on the spot)");
+
+        return ['ok' => true, 'booking_reference' => $b->reference, 'status' => 'confirmed',
+            'instructions' => 'They are on the list. Reply ONE short line, e.g. "Done bro, see you there ⚽". No reference or details.'];
     }
 
     private function joinWaitlist(Contact $contact, array $input): array

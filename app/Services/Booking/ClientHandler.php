@@ -53,12 +53,27 @@ class ClientHandler
             return;
         }
 
+        // Unknown number (no ad, no history): ask the team first, stay quiet until they answer (max 15 min).
+        if (! $contact->act_as_client && $this->agent->needsAdminCheck($contact)) {
+            if (! $contact->client_type_asked_at) {
+                $this->askAdminsWhoThisIs($contact, (string) $logged->body);
+            }
+
+            return;
+        }
+
+        $this->replyNow($contact, $logged);
+    }
+
+    /** Let the agent answer the chat now. */
+    public function replyNow(Contact $contact, ?Message $logged = null): void
+    {
         try {
             $reply = $this->agent->reply($contact);
         } catch (\Throwable $e) {
             Log::error('Agent failed', ['contact' => $contact->wa_id, 'error' => $e->getMessage()]);
             $reply = null;
-            $last = mb_substr((string) $logged->body, 0, 300);
+            $last = mb_substr((string) ($logged?->body ?? $contact->messages()->where('direction', 'in')->latest('id')->value('body')), 0, 300);
             foreach ($this->messenger->adminContacts() as $admin) {
                 $this->messenger->alertAdmin($admin, "⚠️ The bot couldn't answer {$contact->displayName()} (+{$contact->wa_id}): \"{$last}\". Reply from the WhatsApp app.");
             }
@@ -102,5 +117,18 @@ class ClientHandler
             : "Received ✅ Booking {$booking->reference}, your confirmation comes here 👊");
 
         return true;
+    }
+
+    private function askAdminsWhoThisIs(Contact $contact, string $firstMessage): void
+    {
+        $contact->update(['client_type_asked_at' => now()]);
+        $text = "❓ Do you know +{$contact->wa_id}".($contact->name ? " ({$contact->name})" : '')."?\n"
+            ."💬 \"".mb_substr($firstMessage, 0, 200)."\"\n"
+            .'No ad, no chat history. I wait for you before replying (max 15 min, then I guess from what they write).';
+        foreach ($this->messenger->adminContacts() as $admin) {
+            $admin->windowIsOpen()
+                ? $this->messenger->buttons($admin, $text, ['who:'.$contact->id.':old' => '✅ Old client', 'who:'.$contact->id.':new' => '🆕 New player'])
+                : $this->messenger->alertAdmin($admin, $text."\nReply: old {$contact->wa_id} / new {$contact->wa_id}");
+        }
     }
 }

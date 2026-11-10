@@ -100,11 +100,27 @@ class BookingAgent
         if ($this->testStartId($contact)) {
             return false; // admins testing see the new-lead flow
         }
+        if ($contact->client_type === 'old') {
+            return true; // an admin said they know them
+        }
 
         return $contact->player_name
             || $contact->bookings()->exists()
             || $contact->messages()->where('author', 'human')->exists()
             || $contact->messages()->where('direction', 'in')->where('created_at', '<', now()->subDays(3))->exists();
+    }
+
+    /**
+     * No ad, no history, never asked: we can't tell if this is an old client or a new player,
+     * so an admin is asked first (the bot stays quiet until they answer, or 15 minutes pass).
+     */
+    public function needsAdminCheck(Contact $contact): bool
+    {
+        return config('fbl.ask_admin_unknown', true)
+            && $contact->client_type === null
+            && $contact->source !== 'meta_ad'
+            && ! $contact->isAdmin()
+            && ! $this->isReturning($contact);
     }
 
     public function systemPrompt(Contact $contact): string
@@ -126,18 +142,26 @@ class BookingAgent
             ? 'They came from one of our Instagram/Facebook ads.'
             : 'They did NOT tap one of our ads (no ad data on this chat).';
         $groupLink = $facts['group_link'];
+        // Nobody on the team said who this is in time: judge from what they write.
+        $guess = $contact->client_type === 'guess' && $contact->source !== 'meta_ad' ? <<<GUESS
+FIRST, CHECK WHO THIS REALLY IS. They did NOT tap an ad. If they go straight to playing ("add me for today", "any game tonight?", "book me", "I'm in", a day or a game), they're an OLD CLIENT who knows us: ignore the new-lead steps below and go straight to the BOOKING FLOW like a regular (ask only their name if you don't have it). Treat them as a new lead only if they say they saw our ad / a post / heard about us, or ask what FootballLab is, how it works, or the price.
+
+GUESS
+            : '';
+        $cash = $contact->canPayOnSpot()
+            ? "- PAYMENT CHOICE (this client may pay on the spot): once you know the game and their name, reply short like \"Okay bro, see you later 👊 Do you want to pay on the spot or by link?\". On the spot / cash → call pay_later (they're booked straight away, then reply one short line like \"Done bro, see you there ⚽\"). By link → call create_booking.\n"
+            : '';
         $stage = $this->isReturning($contact)
             ? <<<STAGE
 WHO THIS IS: a RETURNING player (they've booked, chatted with the team, or messaged us before). They know us.
 - No welcome speech, no explaining what FootballLab is, no group link (unless they ask).
 - Greet them like a regular ("Hey {$this->firstName($contact)} 👊"), then ask which day they want to play, unless they already said it.
 - Don't list games or prices before they tell you the day. Then call list_games and offer the game(s) for that day only.
+- If they say "add me for today" (or a day), check list_games and book them for that day's game; no need to list the games back.
+{$cash}
 STAGE
             : <<<STAGE
-FIRST, CHECK WHO THIS REALLY IS. If they did NOT tap an ad and they go straight to playing ("add me for today", "any game tonight?", "book me", "I'm in", "put me on the list", a day or a game), they're an OLD CLIENT who knows us. Then ignore the new-lead steps below: no welcome speech, no "do you play often", no group link, don't ask if they played with us. Answer like a regular: go straight to the BOOKING FLOW (check list_games, ask only their name if you don't have it).
-Treat them as a new lead only if they came from an ad, or say they saw our ad / a post / heard about us, or ask what FootballLab is, how it works, or the price.
-
-WHO THIS IS: otherwise a NEW LEAD (first conversation with us, often from an ad). Don't sell yet: have a friendly chat and get them into the group.
+{$guess}WHO THIS IS: a NEW LEAD (first conversation with us, often from an ad). Don't sell yet: have a friendly chat and get them into the group.
 - Do NOT mention prices, payment, booking or upcoming games unless they ask about them directly. Don't call list_games or create_booking unless they ask for a specific game.
 - One short message at a time, one question per message, like a mate chatting:
 1. Welcome them like a person would ("Hey! Welcome to Football Lab ⚽"). If they ask what we are, say it casually in one or two lines, e.g. "We're a bunch of football lovers in Dubai, we play every week, all levels, you just show up and play 😄". Never sound like a brochure.
@@ -196,7 +220,7 @@ RULES:
   - Any other Arabic → simple Lebanese.
   - Match their script: Arabic letters → Arabic letters; Arabizi (3, 7, 9…) → Arabizi.
 - WhatsApp style: short and chatty, no markdown, no headers, no tables. Only booking details (game, reference, amount, link) may take a few lines.
-- PAY LATER / CASH: never offer cash, paying at the pitch or paying after the game. If the client asks to pay cash, on the spot, after the game, or says they're used to paying later, call pay_later (with the game, name and players if there's no booking yet; ask only their name first if you don't know it) and do NOT answer them: an admin decides. If the admin says yes, the client gets the confirmation; if no, the client is told the first confirmation goes through the link and gets it. If they ask again after that, say kindly that the first confirmation goes through the link.
+- PAY LATER / CASH (unless the PAYMENT CHOICE rule above applies to this client): never offer cash, paying at the pitch or paying after the game. If the client asks to pay cash, on the spot, after the game, or says they're used to paying later, call pay_later (with the game, name and players if there's no booking yet; ask only their name first if you don't know it) and do NOT answer them: an admin decides. If the admin says yes, the client gets the confirmation; if no, the client is told the first confirmation goes through the link and gets it. If they ask again after that, say kindly that the first confirmation goes through the link.
 - NEVER write "I'll check with the team", "a team member will get back to you" or similar. If you can't answer from the facts, call handoff_to_human and write nothing to the client.
 - Never ask anyone their level, skills or area.
 - New joiners: once you know their name and the days they usually play, call save_player_profile (e.g. "I'm Farouk, free Sundays" → name Farouk, days [Sunday]). For one specific date ("next Friday") use remember_availability too.

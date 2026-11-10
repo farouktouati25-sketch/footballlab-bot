@@ -32,6 +32,7 @@
         <env name="WHATSAPP_APP_SECRET" value="test-secret" force="true"/>
         <env name="WHATSAPP_VERIFY_TOKEN" value="verify-me" force="true"/>
         <env name="WHATSAPP_GRAPH_VERSION" value="v23.0" force="true"/>
+        <env name="FBL_ASK_ADMIN_UNKNOWN" value="false" force="true"/>
         <env name="ADMIN_NUMBERS" value="971500000091,971500000092" force="true"/>
         <env name="ADMIN_NAMES" value="Farouk,Partner" force="true"/>
         <env name="ANTHROPIC_API_KEY" value="test-key" force="true"/>

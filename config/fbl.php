@@ -28,6 +28,10 @@ return [
             .'Paying per game stays available for anyone who prefers it.',
     ],
 
+    // Unknown number (no ad, no chat history): ask the admins "old client or new player?" before replying.
+    'ask_admin_unknown' => (bool) env('FBL_ASK_ADMIN_UNKNOWN', true),
+    'ask_admin_wait_minutes' => (int) env('FBL_ASK_ADMIN_WAIT_MINUTES', 15),
+
     'defaults' => [
         'capacity' => (int) env('FBL_DEFAULT_CAPACITY', 14),
         'price' => (int) env('FBL_DEFAULT_PRICE', 50),

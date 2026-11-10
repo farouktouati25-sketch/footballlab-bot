@@ -208,6 +208,12 @@ class AdminHandler
             return;
         }
 
+        if (preg_match('/^(old|new)\s+\+?([\d\s]{8,20})$/i', $text, $m)) {
+            $this->setClientType($admin, Contact::firstOrCreate(['wa_id' => \App\Support\Phone::normalize($m[2])]), mb_strtolower($m[1]));
+
+            return;
+        }
+
         if ($lower === 'saved') {
             $this->reply($admin, '📇 '.Contact::whereNotNull('saved_at')->count().' saved clients the bot leaves alone. Send contact cards or a .vcf file to add more.');
 
@@ -365,6 +371,7 @@ class AdminHandler
             'wl_send' => $this->waitlistAnswer($admin, (int) $ref, true),
             'wl_skip' => $this->waitlistAnswer($admin, (int) $ref, false),
             'fmt' => $this->pickFormat($admin, $ref),
+            'who' => $this->setClientType($admin, Contact::find((int) strtok($ref, ':')), (string) substr((string) strrchr($ref, ':'), 1)),
             default => $this->reply($admin, self::HELP),
         };
     }
@@ -590,6 +597,34 @@ class AdminHandler
                 'I found '.count($lines)." new game(s):\n".implode("\n", $lines)."\n\nPublish so the bot can take bookings?",
                 ['publish:'.$batch => '✅ Publish', 'discard:'.$batch => '🗑 Discard']
             );
+        }
+    }
+
+    /** Admin says who an unknown number is; the bot then answers them (if it hasn't already). */
+    private function setClientType(Contact $admin, ?Contact $client, string $type): void
+    {
+        if (! $client || ! in_array($type, ['old', 'new'], true)) {
+            $this->reply($admin, 'That contact is gone.');
+
+            return;
+        }
+        $already = in_array($client->client_type, ['old', 'new'], true);
+        $client->update(['client_type' => $type]);
+        $who = $client->displayName().' (+'.$client->wa_id.')';
+
+        foreach ($this->messenger->adminContacts() as $other) {
+            if ($other->wa_id !== $admin->wa_id) {
+                $this->messenger->alertAdmin($other, "{$admin->adminName()}: {$who} is ".($type === 'old' ? 'an old client' : 'a new player').'.');
+            }
+        }
+
+        // Their last message is still unanswered (and nobody replied from the phone): answer it now.
+        $last = $client->messages()->latest('id')->first();
+        $answerNow = $last && $last->direction === 'in' && ! $client->fresh()->botIsPaused();
+        $this->reply($admin, ($type === 'old' ? "✅ {$who}: old client. " : "🆕 {$who}: new player. ")
+            .($answerNow ? 'Answering them now.' : ($already ? 'Updated.' : 'Noted.')));
+        if ($answerNow) {
+            app(ClientHandler::class)->replyNow($client->fresh(), $last);
         }
     }
 

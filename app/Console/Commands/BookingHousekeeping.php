@@ -65,6 +65,17 @@ class BookingHousekeeping extends Command
             ->get()
             ->each(fn ($game) => $roster->offerFreedSpots($game));
 
+        // 2c) Unknown numbers nobody on the team identified within 15 min: the bot answers anyway (guessing from their words).
+        \App\Models\Contact::whereNull('client_type')->whereNotNull('client_type_asked_at')
+            ->where('client_type_asked_at', '<=', now()->subMinutes((int) config('fbl.ask_admin_wait_minutes', 15)))->get()
+            ->each(function (\App\Models\Contact $c) {
+                $c->update(['client_type' => 'guess']);
+                $last = $c->messages()->latest('id')->first();
+                if ($last && $last->direction === 'in' && ! $c->botIsPaused()) {
+                    app(\App\Services\Booking\ClientHandler::class)->replyNow($c, $last);
+                }
+            });
+
         // 2b) Chats the bot handed to the team that nobody has answered yet: remind at 15 min and 1 h.
         \App\Models\Contact::whereNotNull('handoff_at')->get()->each(function (\App\Models\Contact $c) use ($messenger) {
             $due = [15, 60][$c->handoff_reminders] ?? null;

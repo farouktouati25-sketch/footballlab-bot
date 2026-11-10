@@ -9,7 +9,7 @@ class Contact extends Model
 {
     protected $fillable = [
         'wa_id', 'name', 'last_inbound_at', 'bot_paused_until', 'act_as_client', 'first_referral', 'source', 'reminders_opted_out_at', 'player_name', 'preferred_days',
-        'handoff_at', 'handoff_reason', 'handoff_reminders', 'saved_at',
+        'handoff_at', 'handoff_reason', 'handoff_reminders', 'saved_at', 'client_type', 'client_type_asked_at',
     ];
 
     protected function casts(): array
@@ -18,6 +18,7 @@ class Contact extends Model
             'last_inbound_at' => 'datetime',
             'bot_paused_until' => 'datetime',
             'saved_at' => 'datetime',
+            'client_type_asked_at' => 'datetime',
             'reminders_opted_out_at' => 'datetime',
             'handoff_at' => 'datetime',
             'handoff_reminders' => 'integer',
@@ -60,6 +61,13 @@ class Contact extends Model
     public function botIsPaused(): bool
     {
         return $this->isSaved() || ($this->bot_paused_until !== null && $this->bot_paused_until->isFuture());
+    }
+
+    /** An admin said this is an old client, or they already played with us (a confirmed booking): they may pay on the spot. */
+    public function canPayOnSpot(): bool
+    {
+        return $this->client_type === 'old'
+            || $this->bookings()->where('status', 'confirmed')->exists();
     }
 
     /** Saved in the admins' phone (an old client): the bot never replies or messages them; the team does. */
