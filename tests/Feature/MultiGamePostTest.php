@@ -60,6 +60,38 @@ class MultiGamePostTest extends TestCase
         $this->assertStringContainsString("GAME 1\n1. Ali\n2. Omar\n3.\n\nGAME 2\n1. Sami\n2. Karim\n\nWAITING LIST\n1.\n\nSee you there!", $text);
     }
 
+    public function test_todays_post_overrides_the_format_picked_yesterday_and_opens_game_2(): void
+    {
+        $date = now('Asia/Dubai')->addDay()->format('Y-m-d');
+        $startsAt = Carbon::parse("{$date} 21:00", 'Asia/Dubai')->utc();
+        // Yesterday the admin answered 11v11 for the weekly game.
+        $g1 = Game::create(['starts_at' => $startsAt, 'venue' => 'Dubai Schools Al Barsha', 'format' => '11v11', 'price' => 58, 'capacity' => 22,
+            'status' => 'published', 'weekly_key' => 'tuesday@21:00']);
+
+        Http::fake(function (Request $r) use ($date) {
+            if (str_contains($r->url(), 'anthropic')) {
+                return Http::response(['content' => [['type' => 'tool_use', 'id' => 's1', 'name' => 'save_games', 'input' => ['games' => [
+                    ['date' => $date, 'start_time' => '21:00', 'venue' => 'Dubai Schools Barsha', 'price' => 50, 'capacity' => 16, 'format' => '8 a side', 'players' => ['Ali', 'Omar']],
+                    ['date' => $date, 'start_time' => '21:00', 'venue' => 'Dubai Schools Barsha', 'price' => 50, 'capacity' => 16, 'format' => '8 a side', 'players' => ['Sami']],
+                ]]]], 'stop_reason' => 'tool_use']);
+            }
+
+            return Http::response(['messages' => [['id' => 'wamid.out.'.uniqid()]]]);
+        });
+
+        $post = "TUESDAY 8V8 ⚽\n\nGAME 1\n1. Ali\n2. Omar\n3.\n\nGAME 2\n1. Sami\n2.";
+        Contact::create(['wa_id' => self::ADMIN_1, 'last_inbound_at' => now()]);
+        $this->whatsapp(self::ADMIN_1, ['type' => 'text', 'text' => ['body' => $post], 'context' => ['forwarded' => true]]);
+
+        $g1->refresh();
+        $this->assertSame(['8v8', 53.0, 16], [$g1->format, (float) $g1->price, $g1->capacity]);
+
+        $g2 = Game::where('id', '!=', $g1->id)->sole();
+        $this->assertSame(['published', '8v8', 53.0], [$g2->status, $g2->format, (float) $g2->price]);
+        $this->assertSame(['Sami'], $g2->bookings()->where('status', 'confirmed')->pluck('player_name')->all());
+        $this->assertSame(0, Game::where('format', '11v11')->count());
+    }
+
     private function whatsapp(string $from, array $message): void
     {
         $json = json_encode(['entry' => [['changes' => [[

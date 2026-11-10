@@ -89,7 +89,8 @@ PROMPT;
             $result[] = [
                 'starts_at' => $startsAt,
                 'venue' => mb_substr(trim($g['venue']), 0, 150),
-                'format' => $g['format'] ?? null,
+                'format' => \App\Models\Game::normalizeFormat($g['format'] ?? null),
+                'price_stated' => isset($g['price']) && (float) $g['price'] !== (float) $defaultPrice,
                 'price' => max(0, (float) ($g['price'] ?? $defaultPrice)),
                 'capacity' => max(1, min(100, (int) ($g['capacity'] ?? $defaultCapacity))),
                 'payment_link' => $link,

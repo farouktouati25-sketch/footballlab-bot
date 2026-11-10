@@ -84,6 +84,23 @@ class Game extends Model
     }
 
     /** e.g. "Thu 6 Nov, 9:00 PM · Al Safa Sports Ground (7-a-side)" */
+    /** "8-a-side", "8 vs 8", "8x8", "8V8" → "8v8"; "tournament" → "tournament"; anything else unchanged. */
+    public static function normalizeFormat(?string $format): ?string
+    {
+        $f = mb_strtolower(trim((string) $format));
+        if ($f === '') {
+            return null;
+        }
+        if (str_contains($f, 'tournament') || str_contains($f, 'tourney')) {
+            return 'tournament';
+        }
+        if (preg_match('/(\d{1,2})\s*(?:v|vs\.?|x|-?a-?side|aside|\s+a\s+side)/u', $f, $m)) {
+            return $m[1].'v'.$m[1];
+        }
+
+        return mb_substr(trim((string) $format), 0, 40);
+    }
+
     public function label(): string
     {
         $label = $this->localStart()->format('D j M, g:i A').' · '.$this->venue;

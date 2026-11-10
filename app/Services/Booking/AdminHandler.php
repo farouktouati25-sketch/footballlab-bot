@@ -486,7 +486,12 @@ class AdminHandler
             $usedExisting = [];
             foreach ($games as $k => $g) {
                 $players = $g['players'] ?? [];
-                unset($g['players']);
+                $priceStated = (bool) ($g['price_stated'] ?? false);
+                unset($g['players'], $g['price_stated']);
+                // No price written in the post: use the price for that format (8v8 = 53, 11v11 = 58…).
+                if (! $priceStated && ! empty($g['format'])) {
+                    $g['price'] = (float) app(\App\Services\Booking\WeeklySchedule::class)->terms($g['format'], $g['venue'])['price'];
+                }
                 $listMeta = $single ? [] : ['source_text' => $post, 'list_group' => $group, 'list_part' => $parts[$k] ?? null];
 
                 // Same game already live? Then this post is an updated list: sync it instead of creating a duplicate.
@@ -510,12 +515,15 @@ class AdminHandler
 
                 if ($existing) {
                     // A weekly game still waiting for its format: your post decides it and opens it.
+                    // Your latest post wins: format and price follow it even if the game was already set
+                    // (e.g. you answered 11v11 yesterday, today's post says 8v8).
                     $publishWeekly = $existing->status === 'draft';
+                    $formatChanged = ! empty($g['format']) && $g['format'] !== $existing->format;
                     $existing->update($listMeta + array_filter([
                         'capacity' => $g['capacity'],
                         'source_text' => $single ? $post : $existing->source_text,
-                        'format' => $publishWeekly ? ($g['format'] ?? null) : null,
-                        'price' => $publishWeekly ? $g['price'] : null,
+                        'format' => $publishWeekly || $formatChanged ? ($g['format'] ?? null) : null,
+                        'price' => $publishWeekly || $formatChanged || $priceStated ? $g['price'] : null,
                         'status' => $publishWeekly ? 'published' : null,
                     ], fn ($v) => $v !== null));
                     [$add, $rem] = $this->bookings->syncPostPlayers($existing, $players, $admin);
@@ -529,8 +537,16 @@ class AdminHandler
                     continue;
                 }
 
-                $game = Game::create($listMeta + $g + ['status' => 'draft', 'batch_id' => $batch, 'source_text' => $single ? $post : null]);
+                // Game 2 next to a game that's already live (same time and pitch): open it straight away.
+                $twinLive = $candidates->contains(fn (Game $e) => $e->status === 'published');
+                $game = Game::create($listMeta + $g + ['status' => $twinLive ? 'published' : 'draft', 'batch_id' => $batch, 'source_text' => $single ? $post : null]);
                 $this->bookings->syncPostPlayers($game, $players, $admin);
+                if ($twinLive) {
+                    $fresh = $game->fresh();
+                    $updated[] = "#{$fresh->id} {$fresh->label()} · new, open for booking · {$fresh->confirmedPlayers()}/{$fresh->capacity} · {$fresh->spotsLeft()} left";
+
+                    continue;
+                }
                 $lines[] = "#{$game->id} {$game->label()} · ".(float) $game->price.' '.config('fbl.currency')
                     ." · {$game->confirmedPlayers()}/{$game->capacity} already in · {$game->spotsLeft()} left";
             }
