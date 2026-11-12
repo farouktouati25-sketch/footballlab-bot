@@ -92,6 +92,28 @@ class MultiGamePostTest extends TestCase
         $this->assertSame(0, Game::where('format', '11v11')->count());
     }
 
+    public function test_a_tournament_post_stays_a_tournament_even_if_teams_play_8v8(): void
+    {
+        $date = now('Asia/Dubai')->addDay()->format('Y-m-d');
+        $g1 = Game::create(['starts_at' => Carbon::parse("{$date} 21:00", 'Asia/Dubai')->utc(), 'venue' => 'Dubai Schools Al Barsha', 'format' => '8v8',
+            'price' => 53, 'capacity' => 16, 'status' => 'published', 'weekly_key' => 'friday@21:00']);
+
+        Http::fake(function (Request $r) use ($date) {
+            if (str_contains($r->url(), 'anthropic')) {
+                return Http::response(['content' => [['type' => 'tool_use', 'id' => 's1', 'name' => 'save_games', 'input' => ['games' => [
+                    ['date' => $date, 'start_time' => '21:00', 'venue' => 'Dubai Schools Barsha', 'price' => 50, 'capacity' => 24, 'format' => '8v8', 'players' => ['Ali']],
+                ]]]], 'stop_reason' => 'tool_use']);
+            }
+
+            return Http::response(['messages' => [['id' => 'wamid.out.'.uniqid()]]]);
+        });
+
+        Contact::create(['wa_id' => self::ADMIN_1, 'last_inbound_at' => now()]);
+        $this->whatsapp(self::ADMIN_1, ['type' => 'text', 'text' => ['body' => "🏆 FRIDAY TOURNAMENT 8v8 🏆\n1. Ali\n2.\n3."], 'context' => ['forwarded' => true]]);
+
+        $this->assertSame(['tournament', 24], [$g1->fresh()->format, $g1->fresh()->capacity]);
+    }
+
     private function whatsapp(string $from, array $message): void
     {
         $json = json_encode(['entry' => [['changes' => [[

@@ -45,7 +45,7 @@ PROMPT;
                                 'date' => ['type' => 'string', 'description' => 'YYYY-MM-DD'],
                                 'start_time' => ['type' => 'string', 'description' => 'HH:MM 24h, Dubai time'],
                                 'venue' => ['type' => 'string'],
-                                'format' => ['type' => ['string', 'null'], 'description' => 'e.g. 7-a-side'],
+                                'format' => ['type' => ['string', 'null'], 'description' => 'e.g. 7-a-side, 8v8, 11v11. If the post says it is a tournament / cup / league day, write "tournament" (even if teams play 8v8).'],
                                 'price' => ['type' => 'number'],
                                 'capacity' => ['type' => 'integer'],
                                 'payment_link' => ['type' => ['string', 'null']],
@@ -89,7 +89,10 @@ PROMPT;
             $result[] = [
                 'starts_at' => $startsAt,
                 'venue' => mb_substr(trim($g['venue']), 0, 150),
-                'format' => \App\Models\Game::normalizeFormat($g['format'] ?? null),
+                // A tournament post stays a tournament even if the teams play 8v8.
+                'format' => self::mentionsTournament(($g['format'] ?? '').' '.($g['notes'] ?? '')) || (count($games) === 1 && self::mentionsTournament($post))
+                    ? 'tournament'
+                    : \App\Models\Game::normalizeFormat($g['format'] ?? null),
                 'price_stated' => isset($g['price']) && (float) $g['price'] !== (float) $defaultPrice,
                 'price' => max(0, (float) ($g['price'] ?? $defaultPrice)),
                 'capacity' => max(1, min(100, (int) ($g['capacity'] ?? $defaultCapacity))),
@@ -103,5 +106,10 @@ PROMPT;
         }
 
         return $result;
+    }
+
+    public static function mentionsTournament(string $text): bool
+    {
+        return (bool) preg_match('/tourn|torneo|tournoi|بطولة|\bcup\b|كأس/iu', $text);
     }
 }
