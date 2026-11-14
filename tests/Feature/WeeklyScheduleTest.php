@@ -45,8 +45,9 @@ class WeeklyScheduleTest extends TestCase
         $tue = $byDay['Tue 2026-11-10 21:00'];
         $this->assertSame(['draft', null], [$tue->status, $tue->format]);
 
+        // Sat/Sun now wait for the admins too (format and pitch change every night).
         $sat = $byDay['Sat 2026-11-14 20:00'];
-        $this->assertSame(['published', '11v11', 58.0, 22, 'Dubai Schools Al Barsha'], [$sat->status, $sat->format, (float) $sat->price, $sat->capacity, $sat->venue]);
+        $this->assertSame(['draft', null], [$sat->status, $sat->format]);
 
         $this->assertSame('draft', $byDay['Fri 2026-11-13 21:00']->status);
 
@@ -86,8 +87,31 @@ class WeeklyScheduleTest extends TestCase
         $this->whatsapp(self::ADMIN_1, ['type' => 'interactive',
             'interactive' => ['type' => 'button_reply', 'button_reply' => ['id' => "fmt:{$tue->id}:8v8", 'title' => '8v8']]]);
 
+        // Format saved, but players aren't told until the pitch is confirmed too.
         $tue->refresh();
-        $this->assertSame(['published', '8v8', 53.0, 16], [$tue->status, $tue->format, (float) $tue->price, $tue->capacity]);
+        $this->assertSame(['draft', '8v8'], [$tue->status, $tue->format]);
+        Http::assertSent(fn (Request $r) => ($r->data()['to'] ?? null) === self::ADMIN_1
+            && ($r->data()['interactive']['action']['buttons'][1]['reply']['id'] ?? null) === "loc:{$tue->id}:1");
+
+        // Client asking now: the night is mentioned as not confirmed, nothing bookable.
+        $listed = app(\App\Services\Ai\AgentTools::class)->run(Contact::firstOrCreate(['wa_id' => '971500000001']), 'list_games', []);
+        $this->assertNotContains($tue->id, array_column($listed['games'], 'game_id'));
+        $this->assertContains('Tuesday 10 November, 9:00 PM', $listed['nights_not_confirmed_yet']);
+
+        $this->whatsapp(self::ADMIN_1, ['type' => 'interactive',
+            'interactive' => ['type' => 'button_reply', 'button_reply' => ['id' => "loc:{$tue->id}:1", 'title' => 'Al Safa']]]);
+
+        $tue->refresh();
+        $this->assertSame(['published', '8v8', 'Al Safa Sports Ground', 53.0, 16], [$tue->status, $tue->format, $tue->venue, (float) $tue->price, $tue->capacity]);
+
+        // Typed version for Saturday, pitch first then format; Nad Al Sheba has its own price/spots.
+        $sat = Game::where('weekly_key', 'saturday@20:00')->sole();
+        $this->whatsapp(self::ADMIN_1, ['type' => 'text', 'text' => ['body' => "edit {$sat->id} pitch nad al sheba"]]);
+        $this->assertSame('draft', $sat->fresh()->status);
+        $this->whatsapp(self::ADMIN_1, ['type' => 'text', 'text' => ['body' => "edit {$sat->id} format 11v11"]]);
+        $sat->refresh();
+        $this->assertSame(['published', '11v11', 'North London Collegiate School - Nad Al Sheba', 58.0, 14],
+            [$sat->status, $sat->format, $sat->venue, (float) $sat->price, $sat->capacity]);
     }
 
     public function test_edit_command_changes_price_and_spots(): void

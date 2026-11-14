@@ -60,12 +60,18 @@ return [
     // "choices" = format decided each week: the bot asks admins the day before at "format_question_at".
     'weekly' => [
         ['day' => 'monday', 'time' => '21:00', 'venue' => 'Al Safa Sports Ground', 'format' => '7v7'],
-        ['day' => 'tuesday', 'time' => '21:00', 'venue' => 'Dubai Schools Al Barsha', 'choices' => ['11v11', '8v8', 'tournament']],
+        ['day' => 'tuesday', 'time' => '21:00', 'venue' => 'Dubai Schools Al Barsha', 'choices' => ['8v8', '11v11', 'tournament'], 'venues' => 'nightly'],
         ['day' => 'wednesday', 'time' => '21:00', 'venue' => 'Al Safa Sports Ground', 'format' => '7v7'],
         ['day' => 'thursday', 'time' => '21:00', 'venue' => 'Al Safa Sports Ground', 'format' => '7v7'],
-        ['day' => 'friday', 'time' => '21:00', 'venue' => 'Dubai Schools Al Barsha', 'choices' => ['11v11', '8v8']],
-        ['day' => 'saturday', 'time' => '20:00', 'venue' => 'Dubai Schools Al Barsha', 'format' => '11v11'],
-        ['day' => 'sunday', 'time' => '20:00', 'venue' => 'Dubai Schools Al Barsha', 'format' => '11v11'],
+        ['day' => 'friday', 'time' => '21:00', 'venue' => 'Dubai Schools Al Barsha', 'choices' => ['8v8', '11v11', 'tournament'], 'venues' => 'nightly'],
+        ['day' => 'saturday', 'time' => '20:00', 'venue' => 'Dubai Schools Al Barsha', 'choices' => ['8v8', '11v11', 'tournament'], 'venues' => 'nightly'],
+        ['day' => 'sunday', 'time' => '20:00', 'venue' => 'Dubai Schools Al Barsha', 'choices' => ['8v8', '11v11', 'tournament'], 'venues' => 'nightly'],
+    ],
+    // 'venues' => 'nightly': the admins also confirm the pitch each night (buttons below, button title => venue name).
+    'nightly_venues' => [
+        'Dubai Schools' => 'Dubai Schools Al Barsha',
+        'Al Safa' => 'Al Safa Sports Ground',
+        'Nad Al Sheba' => 'North London Collegiate School - Nad Al Sheba',
     ],
     'weekly_days_ahead' => (int) env('FBL_WEEKLY_DAYS_AHEAD', 7),
     'format_question_at' => env('FBL_FORMAT_QUESTION_AT', '12:00'),

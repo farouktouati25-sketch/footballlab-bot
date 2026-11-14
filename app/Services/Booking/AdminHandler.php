@@ -175,6 +175,20 @@ class AdminHandler
             return;
         }
 
+        if (preg_match('/^edit\s+(\d+)\s+(pitch|venue|location)\s+(.+)$/i', $text, $m)) {
+            $game = Game::find((int) $m[1]);
+            $venue = WeeklySchedule::resolveVenue($m[3]);
+            if (! $game || $game->status === 'cancelled') {
+                $this->reply($admin, "No open game #{$m[1]}.");
+            } elseif (! $venue) {
+                $this->reply($admin, 'Which pitch? Use safa, schools or sheba.');
+            } else {
+                $this->reply($admin, app(WeeklySchedule::class)->setVenue($game, $venue, $admin));
+            }
+
+            return;
+        }
+
         if (preg_match('/^edit\s+(\d+)\s+(format|price|spots)\s+(\S+)$/i', $text, $m)) {
             $this->editGame($admin, (int) $m[1], mb_strtolower($m[2]), $m[3]);
 
@@ -317,6 +331,25 @@ class AdminHandler
         $this->reply($admin, app(WeeklySchedule::class)->setFormat($game, $format, $admin));
     }
 
+    private function pickVenue(Contact $admin, string $ref): void
+    {
+        [$gameId, $idx] = array_pad(explode(':', $ref, 2), 2, '');
+        $game = Game::find((int) $gameId);
+        $venue = array_values((array) config('fbl.nightly_venues', []))[(int) $idx] ?? null;
+        if (! $game || $game->status === 'cancelled' || ! $venue) {
+            $this->reply($admin, 'That game no longer exists.');
+
+            return;
+        }
+        if ($game->venue_confirmed_at && $game->status === 'published') {
+            $this->reply($admin, "#{$game->id} is already set at {$game->venue}. To change it: edit {$game->id} pitch safa / schools / sheba");
+
+            return;
+        }
+
+        $this->reply($admin, app(WeeklySchedule::class)->setVenue($game, $venue, $admin));
+    }
+
     private function editGame(Contact $admin, int $gameId, string $field, string $value): void
     {
         $game = Game::find($gameId);
@@ -371,6 +404,7 @@ class AdminHandler
             'wl_send' => $this->waitlistAnswer($admin, (int) $ref, true),
             'wl_skip' => $this->waitlistAnswer($admin, (int) $ref, false),
             'fmt' => $this->pickFormat($admin, $ref),
+            'loc' => $this->pickVenue($admin, $ref),
             'who' => $this->setClientType($admin, Contact::find((int) strtok($ref, ':')), (string) substr((string) strrchr($ref, ':'), 1)),
             default => $this->reply($admin, self::HELP),
         };

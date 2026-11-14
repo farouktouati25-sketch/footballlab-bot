@@ -150,14 +150,23 @@ class AgentTools
     private function listGames(): array
     {
         $games = Game::upcoming()->limit(15)->get();
+        // Nights we always play but whose format and pitch the team hasn't confirmed yet.
+        $pending = Game::where('status', 'draft')->whereNotNull('weekly_key')->where('starts_at', '>', now())
+            ->orderBy('starts_at')->limit(7)->get()
+            ->map(fn (Game $g) => $g->localStart()->format('l j F, g:i A'))->values()->all();
+        $pendingNote = $pending ? [
+            'nights_not_confirmed_yet' => $pending,
+            'about_those_nights' => 'We play those nights, but the format (8v8 / 11v11 / tournament) and the pitch are confirmed by the team each night. Do NOT state a format or pitch for them and do NOT book them. Say we play that night and the details get confirmed soon, then call remember_availability with that date so they get a message as soon as it is confirmed.',
+        ] : [];
+
         if ($games->isEmpty()) {
-            return [
+            return $pendingNote + [
                 'games' => [],
                 'note' => 'No games are published right now. Ask which day they want to play; when they name a day, call remember_availability so they get a message when that game is posted. You can also share the community group link.',
             ];
         }
 
-        return ['games' => $games->map(fn (Game $g) => [
+        return $pendingNote + ['games' => $games->map(fn (Game $g) => [
             'game_id' => $g->id,
             'when' => $g->localStart()->format('l j F, g:i A'),
             'venue' => $g->venue,

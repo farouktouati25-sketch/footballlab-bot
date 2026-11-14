@@ -134,6 +134,95 @@ class WeeklySchedule
         return $asked;
     }
 
+    /** Tue/Fri/Sat/Sun: the pitch is confirmed by an admin each night. */
+    public function needsVenue(Game $game): bool
+    {
+        if ($game->venue_confirmed_at || ! $game->weekly_key) {
+            return false;
+        }
+        foreach ((array) config('fbl.weekly', []) as $slot) {
+            if ($game->weekly_key === mb_strtolower($slot['day']).'@'.$slot['time']) {
+                return ($slot['venues'] ?? null) === 'nightly';
+            }
+        }
+
+        return false;
+    }
+
+    /** Ask the admins where tonight's game is (buttons, or a typed command if their chat window is closed). */
+    public function askVenue(Game $game, ?Contact $picker = null): void
+    {
+        $buttons = [];
+        $i = 0;
+        foreach (array_slice((array) config('fbl.nightly_venues', []), 0, 3, true) as $title => $venue) {
+            $buttons['loc:'.$game->id.':'.$i++] = $title;
+        }
+        $when = $game->localStart()->format('l j M, g:i A');
+        $text = "📍 {$when} ({$game->format}): which pitch? (#{$game->id})";
+        foreach ($this->messenger->adminContacts() as $admin) {
+            if ($picker && $admin->wa_id !== $picker->wa_id && ! $admin->windowIsOpen()) {
+                continue;
+            }
+            $admin->windowIsOpen()
+                ? $this->messenger->buttons($admin, $text."\nPlayers get confirmed once you pick.", $buttons)
+                : $this->messenger->alertAdmin($admin, $text.' Reply: edit '.$game->id.' pitch safa / schools / sheba');
+        }
+    }
+
+    /** Turn "safa", "barsha", "nad al sheba"… into the venue name. */
+    public static function resolveVenue(string $text): ?string
+    {
+        $t = mb_strtolower(trim($text));
+        foreach ((array) config('fbl.nightly_venues', []) as $title => $venue) {
+            if ($t === mb_strtolower($title) || $t === mb_strtolower($venue)) {
+                return $venue;
+            }
+        }
+        return match (true) {
+            str_contains($t, 'safa') => 'Al Safa Sports Ground',
+            str_contains($t, 'school') || str_contains($t, 'barsha') => 'Dubai Schools Al Barsha',
+            str_contains($t, 'sheba') || str_contains($t, 'north london') || str_contains($t, 'nlcs') => 'North London Collegiate School - Nad Al Sheba',
+            default => null,
+        };
+    }
+
+    /**
+     * Admin confirmed the pitch: set price/spots for that pitch and publish if the format is known too.
+     *
+     * @return string reply for the admin
+     */
+    public function setVenue(Game $game, string $venue, Contact $admin): string
+    {
+        $wasDraft = $game->status === 'draft';
+        $terms = $this->terms($game->format ?: ($this->choicesFor($game)[0] ?? '11v11'), $venue);
+        $game->update(['venue' => $venue, 'venue_confirmed_at' => now(), 'price' => $terms['price'],
+            'capacity' => max($terms['capacity'], $game->confirmedPlayers())]);
+        $game = $game->fresh();
+
+        if ($wasDraft && ! $game->format) {
+            return "📍 #{$game->id} at {$venue}. Now the format: edit {$game->id} format ".implode(' / ', $this->choicesFor($game));
+        }
+        if (! $wasDraft) {
+            return "✅ #{$game->id} {$game->label()} · ".(float) $game->price.' '.config('fbl.currency')." · {$game->capacity} spots.";
+        }
+
+        $game->update(['status' => 'published']);
+        $game = $game->fresh();
+        $line = "#{$game->id} {$game->label()} · ".(float) $game->price.' '.config('fbl.currency')." · {$game->capacity} spots";
+        foreach ($this->messenger->adminContacts() as $other) {
+            if ($other->wa_id !== $admin->wa_id) {
+                $this->messenger->alertAdmin($other, "✅ {$admin->adminName()} set {$line} and it is open for booking.");
+            }
+        }
+        $notified = $this->roster->notifyWaitlist($game);
+        $reminded = app(ReminderService::class)->notifyForGame($game);
+
+        return "✅ {$line} is open for booking."
+            .($game->format === 'tournament' ? "\nChange price/spots with: edit {$game->id} price 70 · edit {$game->id} spots 24" : '')
+            .($notified ? " Told {$notified} waitlisted player(s)." : '')
+            .($reminded ? " {$reminded} player(s) to invite: list below 👇" : '');
+    }
+
     /** @return string[] */
     public function choicesFor(Game $game): array
     {
@@ -160,6 +249,15 @@ class WeeklySchedule
 
         $terms = $this->terms($format, $game->venue);
         $wasDraft = $game->status === 'draft';
+
+        // Pitch still to confirm for tonight: save the format, then ask where.
+        if ($wasDraft && $this->needsVenue($game)) {
+            $game->update(['format' => $format, 'price' => $terms['price'], 'capacity' => max($terms['capacity'], $game->confirmedPlayers())]);
+            $this->askVenue($game->fresh(), $admin);
+
+            return "👍 #{$game->id} is {$format}. Which pitch? 👇";
+        }
+
         $game->update(['format' => $format, 'price' => $terms['price'], 'capacity' => max($terms['capacity'], $game->confirmedPlayers())]
             + ($wasDraft ? ['status' => 'published'] : []));
         $game = $game->fresh();

@@ -9,7 +9,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 class Game extends Model
 {
     protected $fillable = [
-        'starts_at', 'venue', 'format', 'price', 'capacity', 'payment_link', 'notes', 'status', 'batch_id', 'source_text', 'weekly_key', 'format_asked_at', 'list_group', 'list_part',
+        'starts_at', 'venue', 'format', 'price', 'capacity', 'payment_link', 'notes', 'status', 'batch_id', 'source_text', 'weekly_key', 'format_asked_at', 'venue_confirmed_at', 'list_group', 'list_part',
     ];
 
     protected function casts(): array
@@ -19,6 +19,7 @@ class Game extends Model
             'price' => 'decimal:2',
             'capacity' => 'integer',
             'format_asked_at' => 'datetime',
+            'venue_confirmed_at' => 'datetime',
         ];
     }
 
