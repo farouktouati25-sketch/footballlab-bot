@@ -48,7 +48,8 @@ class SuggestPlayersTest extends TestCase
                 && str_contains($body, '+'.$sameDay->wa_id.' · played this weekday before')
                 && str_contains($body, '+'.$recent->wa_id.' · played in the last 3 days')
                 && str_contains($body, 'no number saved): Khalid')
-                && ! str_contains($body, $other->wa_id);
+                // the game is far from full, so people who played other days lately are added too
+                && str_contains($body, '+'.$other->wa_id.' · played in the last weeks');
         });
         Http::assertSent(fn (Request $r) => ($r->data()['to'] ?? null) === self::ADMIN_1
             && ($r->data()['interactive']['action']['buttons'][0]['reply']['id'] ?? null) === "inv:{$game->id}"
@@ -60,9 +61,9 @@ class SuggestPlayersTest extends TestCase
         Http::assertSent(fn (Request $r) => ($r->data()['to'] ?? null) === $recent->wa_id
             && str_contains($r->data()['text']['body'] ?? '', 'Hey Ali 👋')
             && str_contains($r->data()['text']['body'] ?? '', 'tomorrow at 9:00 PM'));
-        Http::assertNotSent(fn (Request $r) => in_array($r->data()['to'] ?? null, [$sameDay->wa_id, $other->wa_id, $already->wa_id], true));
+        Http::assertNotSent(fn (Request $r) => in_array($r->data()['to'] ?? null, [$sameDay->wa_id, $already->wa_id], true));
         Http::assertSent(fn (Request $r) => ($r->data()['to'] ?? null) === self::ADMIN_1
-            && str_contains($r->data()['text']['body'] ?? '', 'Invited 1: Ali Hassan')
+            && str_contains($r->data()['text']['body'] ?? '', 'Invited 2: ')
             && str_contains($r->data()['text']['body'] ?? '', 'Omar · +'.$sameDay->wa_id));
     }
 

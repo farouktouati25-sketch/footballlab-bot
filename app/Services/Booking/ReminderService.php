@@ -150,11 +150,15 @@ class ReminderService
 
         $recipients = [];   // contact_id => reason
         $noNumber = [];     // names from your group lists (no phone saved)
+        $others = [];       // played in the last weeks, other days: used when the first circle can't fill the game
         foreach ($played as $row) {
             $at = Carbon::parse($row->starts_at, 'UTC');
             $reason = $at->gt(now()->subDays(3)) ? 'recent'
                 : ($at->copy()->setTimezone($tz)->dayOfWeek === $local->dayOfWeek ? 'same_day' : null);
             if (! $reason) {
+                if ($row->contact_id) {
+                    $others[$row->contact_id] = 'lapsed';
+                }
                 continue;
             }
             if ($row->contact_id) {
@@ -165,6 +169,10 @@ class ReminderService
             } else {
                 $noNumber[mb_strtolower(trim($row->player_name))] = trim($row->player_name);
             }
+        }
+        // Not enough people to fill the free spots (aim for 2 invites per spot): widen to everyone who played lately.
+        if (count($recipients) < 2 * max(1, $game->spotsLeft())) {
+            $recipients += $others;
         }
         AvailabilityRequest::where('play_date', $day)->pluck('contact_id')
             ->each(function ($id) use (&$recipients) { $recipients[$id] = 'asked'; });
@@ -233,7 +241,7 @@ class ReminderService
             return false;
         }
 
-        $why = ['asked' => 'asked for this day', 'usual_day' => 'usually free this day', 'recent' => 'played in the last 3 days', 'same_day' => 'played this weekday before', 'lapsed' => 'hasn\'t played lately'];
+        $why = ['asked' => 'asked for this day', 'usual_day' => 'usually free this day', 'recent' => 'played in the last 3 days', 'same_day' => 'played this weekday before', 'lapsed' => 'played in the last weeks'];
         $lines = $rows->map(function ($r, $i) use ($why) {
             $c = Contact::find($r->contact_id);
 
