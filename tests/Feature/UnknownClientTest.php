@@ -80,8 +80,8 @@ class UnknownClientTest extends TestCase
         // Only an admin confirms: the booking waits for the approve button, the client hears "noted".
         $this->assertSame('awaiting_approval', $booking->status);
         $this->assertTrue($booking->wantsCash());
-        Http::assertSent(fn (Request $r) => ($r->data()['to'] ?? null) === self::CLIENT
-            && str_contains($r->data()['text']['body'] ?? '', "I'll confirm your spot shortly"));
+        // Silent until an admin decides.
+        Http::assertNotSent(fn (Request $r) => ($r->data()['to'] ?? null) === self::CLIENT);
         Http::assertSent(fn (Request $r) => ($r->data()['to'] ?? null) === self::ADMIN_1 && isset($r->data()['interactive']));
     }
 
