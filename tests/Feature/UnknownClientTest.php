@@ -66,23 +66,23 @@ class UnknownClientTest extends TestCase
         $this->assertStringContainsString('this client may pay on the spot', $prompt);
     }
 
-    public function test_old_client_paying_on_the_spot_is_booked_straight_away(): void
+    public function test_old_client_paying_on_the_spot_waits_for_an_admin(): void
     {
         $client = Contact::create(['wa_id' => self::CLIENT, 'name' => 'Isa', 'client_type' => 'old', 'last_inbound_at' => now()]);
         $game = Game::create(['starts_at' => now()->addHours(5), 'venue' => 'Dubai Schools Al Barsha', 'format' => '8v8', 'price' => 53, 'capacity' => 16, 'status' => 'published']);
         $this->claude = [
             ['content' => [['type' => 'tool_use', 'id' => 't1', 'name' => 'pay_later', 'input' => ['game_id' => $game->id, 'player_name' => 'Isa', 'players' => 1, 'what_they_said' => 'on the spot']]], 'stop_reason' => 'tool_use'],
-            ['content' => [['type' => 'text', 'text' => 'Done bro, see you there ⚽']], 'stop_reason' => 'end_turn'],
+            ['content' => [['type' => 'text', 'text' => 'Noted bro 👊 I\'ll confirm your spot shortly.']], 'stop_reason' => 'end_turn'],
         ];
         $this->whatsapp(self::CLIENT, ['type' => 'text', 'text' => ['body' => 'On the spot']]);
 
         $booking = Booking::sole();
-        $this->assertSame('confirmed', $booking->status);
+        // Only an admin confirms: the booking waits for the approve button, the client hears "noted".
+        $this->assertSame('awaiting_approval', $booking->status);
         $this->assertTrue($booking->wantsCash());
         Http::assertSent(fn (Request $r) => ($r->data()['to'] ?? null) === self::CLIENT
-            && ($r->data()['text']['body'] ?? '') === 'Done bro, see you there ⚽');
-        Http::assertSent(fn (Request $r) => ($r->data()['to'] ?? null) === self::ADMIN_1
-            && str_contains($r->data()['text']['body'] ?? '', 'pays on the spot'));
+            && str_contains($r->data()['text']['body'] ?? '', "I'll confirm your spot shortly"));
+        Http::assertSent(fn (Request $r) => ($r->data()['to'] ?? null) === self::ADMIN_1 && isset($r->data()['interactive']));
     }
 
     public function test_nobody_answers_in_15_minutes_so_the_bot_replies_anyway(): void

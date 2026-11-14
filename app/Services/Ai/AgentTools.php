@@ -57,7 +57,7 @@ class AgentTools
             ],
             [
                 'name' => 'pay_later',
-                'description' => 'The client wants to pay on the spot / cash / after the game. Never offer this yourself unless the PAYMENT CHOICE rule says this client may pay on the spot: then they are booked straight away and you reply one short line. For everyone else it books them pending the admins\' OK and stays silent: the client gets NO reply from you now. Pass game_id + player_name + players for a new booking, or booking_reference if they already have one.',
+                'description' => 'The client wants to pay on the spot / cash / after the game. Never offer this yourself unless the PAYMENT CHOICE rule says this client may pay on the spot: then the team confirms the spot and you reply one short line (never say they are confirmed). For everyone else it books them pending the admins\' OK and stays silent: the client gets NO reply from you now. Pass game_id + player_name + players for a new booking, or booking_reference if they already have one.',
                 'input_schema' => [
                     'type' => 'object',
                     'properties' => [
@@ -201,7 +201,7 @@ class AgentTools
                 'players' => $booking->players,
                 'amount' => $booking->amountLabel(),
                 'payment_link_comes' => $booking->link_due_at->copy()->setTimezone(config('fbl.timezone'))->format('l j M, g:i A'),
-                'instructions' => 'Spot reserved, nothing to pay now. Reply in ONE short line, e.g. "Done ✅ I\'ll send you the link the day before the game to pay and confirm your spot." No reference, price or game details unless they ask.',
+                'instructions' => 'Spot reserved, nothing to pay now. Reply in ONE short line, e.g. "Noted 👍 I\'ll send you the link the day before the game to pay, then the team confirms your spot." Never say they are confirmed or in. No reference, price or game details unless they ask.',
             ];
         }
         $online = (bool) $booking->fresh()->payment_intent_id;
@@ -214,7 +214,7 @@ class AgentTools
             'payment_link' => $link,
             'hold_minutes' => (int) config('fbl.payment_timeout_minutes', 120),
             'instructions' => ! $link && config('fbl.payments.mode') === 'admin_link'
-                ? 'Reply in ONE short line: "Done ✅ I\'ll send you the link shortly to pay and confirm your spot." No reference or details unless they ask. Never say you will check with the team. Do not invent a link.'
+                ? 'Reply in ONE short line: "Noted 👍 I\'ll send you the link shortly to pay, then the team confirms your spot." Never say they are confirmed or in. No reference or details unless they ask. Never say you will check with the team. Do not invent a link.'
                 : ($link
                 ? ($online
                     ? 'Send the amount and this personal payment link. Payment is detected automatically, so no screenshot is needed; the client gets a message here once paid. Spot is held for hold_minutes.'
@@ -253,10 +253,7 @@ class AgentTools
                 ->when(! empty($input['game_id']), fn ($q) => $q->where('game_id', (int) $input['game_id']))
                 ->latest()->first();
 
-        if ($contact->canPayOnSpot()) {
-            return $this->bookPayOnSpot($contact, $booking, $input, $note);
-        }
-
+        $onSpot = $contact->canPayOnSpot();
         if (! $booking) {
             if (empty($input['game_id']) || empty($input['player_name'])) {
                 return ['error' => 'Need game_id and player_name (ask for the name if you don\'t know it).'];
@@ -272,36 +269,14 @@ class AgentTools
         if (! $this->bookings->reportPayment($booking, null, $note)) {
             return ['error' => 'Could not send this to the team (booking '.$booking->status.' or game full). Offer other games or the waiting list.'];
         }
+        if ($onSpot) {
+            // Old client paying on the spot: the team still confirms the spot (they get the approve buttons).
+            return ['ok' => true, 'status' => 'waiting_for_team',
+                'instructions' => 'Reply ONE short line like "Noted bro 👊 I\'ll confirm your spot shortly." Never say they are confirmed or in: the team confirms.'];
+        }
         $this->silent = true;
 
         return ['ok' => true, 'instructions' => 'Done. Do not reply to the client.'];
-    }
-
-    /** Old client paying on the spot: confirmed now, no approval, admins told. */
-    private function bookPayOnSpot(Contact $contact, ?Booking $booking, array $input, string $note): array
-    {
-        if (! $booking) {
-            if (empty($input['game_id']) || empty($input['player_name'])) {
-                return ['error' => 'Need game_id and player_name (ask for the name if you don\'t know it).'];
-            }
-            $result = $this->bookings->create($contact, (int) $input['game_id'], (string) $input['player_name'], (int) ($input['players'] ?? 1));
-            if (! $result['ok']) {
-                return ['error' => $result['error']];
-            }
-            $booking = $result['booking'];
-        }
-
-        $booking->update(['status' => 'confirmed', 'payment_note' => mb_substr($note, 0, 250), 'decided_by' => 'bot', 'decided_at' => now()]);
-        $b = $booking->fresh(['game']);
-        $game = $b->game;
-        foreach ($this->messenger->adminContacts() as $admin) {
-            $this->messenger->alertAdmin($admin, "💵 {$b->player_name} (+{$contact->wa_id}) booked {$game->label()} · pays on the spot ({$b->amountLabel()}) · "
-                ."{$game->confirmedPlayers()}/{$game->capacity} confirmed");
-        }
-        $this->roster->shareUpdated($game, "{$b->player_name} confirmed (pays on the spot)");
-
-        return ['ok' => true, 'booking_reference' => $b->reference, 'status' => 'confirmed',
-            'instructions' => 'They are on the list. Reply ONE short line, e.g. "Done bro, see you there ⚽". No reference or details.'];
     }
 
     private function joinWaitlist(Contact $contact, array $input): array
