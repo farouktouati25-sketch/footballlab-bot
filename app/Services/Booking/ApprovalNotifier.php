@@ -20,7 +20,7 @@ class ApprovalNotifier
         $client = $booking->contact;
         $spotsAfter = $game->confirmedPlayers() + $booking->players;
         $proof = $booking->isNewBookingRequest()
-            ? 'not paid yet. ✅ Confirm = you know them, no link needed · 💳 Send link = they pay first'
+            ? 'not paid yet. ✅ Confirm = no link needed · 💳 Confirm + link = confirmed, I ask you for the pay link · ❌ Full = I tell them it\'s full'
             : ($booking->wantsCash() && ! $booking->payment_proof_media_id && ! $booking->payment_verified
             ? '🕐 wants to PAY LATER, not paid yet'.(str_contains((string) $booking->payment_note, ':') ? ' ("'.trim(substr((string) $booking->payment_note, strpos((string) $booking->payment_note, ':') + 1)).'")' : '')
                 .'. Book = OK without paying first · Send link = they pay now'
@@ -36,6 +36,16 @@ class ApprovalNotifier
             ."👥 {$booking->players} player(s) · 💰 {$booking->amountLabel()}\n"
             ."🧾 Payment: {$proof}\n"
             ."📊 After confirming: {$spotsAfter}/{$game->capacity}";
+
+        if ($booking->isNewBookingRequest()) {
+            foreach ($this->messenger->adminContacts() as $admin) {
+                $admin->windowIsOpen()
+                    ? $this->messenger->buttons($admin, $summary, ['approve:'.$booking->id => '✅ Confirm', 'cnflink:'.$booking->id => '💳 Confirm + link', 'full:'.$booking->id => '❌ Full'], null, 'First tap wins')
+                    : $this->messenger->alertAdmin($admin, $summary."\nReply: confirm {$booking->reference} · link {$booking->reference} · full {$booking->reference}");
+            }
+
+            return;
+        }
 
         $buttons = [
             'approve:'.$booking->id => $booking->wantsCash() && ! $booking->payment_proof_media_id ? '✅ Book him' : '✅ Confirm',

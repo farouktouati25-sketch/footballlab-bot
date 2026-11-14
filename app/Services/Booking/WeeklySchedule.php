@@ -72,15 +72,9 @@ class WeeklySchedule
             'format' => $format,
             'price' => $terms['price'],
             'capacity' => $terms['capacity'],
-            'status' => $format ? 'published' : 'draft',
+            'status' => 'draft', // only games the admins publish (post or confirm) are offered to clients
             'weekly_key' => $key,
         ]);
-
-        if ($format) {
-            // Same as a manual publish: tell people who asked for that day.
-            $this->roster->notifyWaitlist($game);
-            app(ReminderService::class)->notifyForGame($game);
-        }
 
         return $game;
     }

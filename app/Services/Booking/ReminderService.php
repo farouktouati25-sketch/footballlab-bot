@@ -47,8 +47,14 @@ class ReminderService
             $contact->update(['reminders_opted_out_at' => null]); // asking again = opting back in
         }
 
+        // No game posted for that day: the admins decide (post the game, and the client is told automatically).
+        foreach ($this->messenger->adminContacts() as $admin) {
+            $this->messenger->alertAdmin($admin, '🙋 '.($contact->player_name ?: $contact->name ?: 'A client').' (+'.$contact->wa_id.') wants to play on '
+                .$day->format('l j M').($players > 1 ? " ({$players} players)" : '').'. No game posted for that day yet: forward me the game when it\'s on and I\'ll tell them.');
+        }
+
         return ['saved' => true, 'day' => $day->format('l j F'),
-            'note' => 'Tell the client: saved, we will message them here as soon as the game for that day is posted. No payment needed now.'];
+            'note' => 'Tell the client in one short line that you\'ll check with the team and get back to them (e.g. "Let me check with the team and come back to you 👊"). Do not promise a game, format or pitch.'];
     }
 
     /**

@@ -112,6 +112,17 @@ class AdminHandler
             return;
         }
 
+        if (preg_match('/^(link|full)\s+(fbl-[a-z0-9]{5})$/i', $text, $m)) {
+            $booking = Booking::findByReference($m[2]);
+            if (! $booking) {
+                $this->reply($admin, 'No booking '.Str::upper($m[2]).'.');
+            } else {
+                mb_strtolower($m[1]) === 'link' ? $this->confirmAndLink($admin, $booking->id) : $this->rejectFull($admin, $booking->id);
+            }
+
+            return;
+        }
+
         if (preg_match('/^(confirm|approve|reject)\s+(fbl-[a-z0-9]{5})$/i', $text, $m)) {
             $booking = Booking::findByReference($m[2]);
             $booking
@@ -320,7 +331,7 @@ class AdminHandler
             $booking = Booking::findByReference($m[0]);
         }
         if (! $booking) {
-            $waiting = Booking::where('status', 'pending_payment')->whereNotNull('link_requested_at')->whereNull('payment_url')->get();
+            $waiting = Booking::whereIn('status', ['pending_payment', 'confirmed'])->whereNotNull('link_requested_at')->whereNull('payment_url')->get();
             if ($waiting->count() === 1) {
                 $booking = $waiting->first();
             } elseif ($waiting->count() > 1) {
@@ -455,6 +466,8 @@ class AdminHandler
 
         match ($action) {
             'approve' => $this->decide($admin, (int) $ref, true),
+            'cnflink' => $this->confirmAndLink($admin, (int) $ref),
+            'full' => $this->rejectFull($admin, (int) $ref),
             'reject' => $this->decide($admin, (int) $ref, false),
             'publish' => $this->publishBatch($admin, $ref, true),
             'discard' => $this->publishBatch($admin, $ref, false),
@@ -467,6 +480,42 @@ class AdminHandler
             'who' => $this->setClientType($admin, Contact::find((int) strtok($ref, ':')), (string) substr((string) strrchr($ref, ':'), 1)),
             default => $this->reply($admin, self::HELP),
         };
+    }
+
+    /** Confirmed now, and the admin will send a payment link (bot asks for it; reply to that message with the link). */
+    private function confirmAndLink(Contact $admin, int $bookingId): void
+    {
+        $outcome = $this->bookings->decide($bookingId, $admin, true);
+        if ($outcome['result'] === 'done') {
+            app(\App\Services\Payments\PaymentService::class)->requestLinkFromAdmins($outcome['booking']->fresh(['game', 'contact']));
+        } elseif ($outcome['result'] === 'already') {
+            $this->notifier->alreadyDecided($admin, $outcome['booking']);
+        } elseif ($outcome['result'] === 'full') {
+            $this->reply($admin, "⚠️ Can't confirm: game #{$outcome['game']->id} is full. Tap ❌ Full to tell them.");
+        } else {
+            $this->reply($admin, 'That booking no longer exists.');
+        }
+    }
+
+    /** "Full": tell the client kindly and offer the waiting list. */
+    private function rejectFull(Contact $admin, int $bookingId): void
+    {
+        $booking = Booking::with(['game', 'contact'])->find($bookingId);
+        $moved = $booking && Booking::whereKey($bookingId)->whereIn('status', ['awaiting_approval', 'pending_payment'])
+            ->update(['status' => 'rejected', 'decided_by' => $admin->wa_id, 'decided_at' => now()]);
+        if (! $moved) {
+            $booking ? $this->notifier->alreadyDecided($admin, $booking->fresh()) : $this->reply($admin, 'That booking no longer exists.');
+
+            return;
+        }
+        if ($booking->contact) {
+            $first = preg_split('/\s+/u', trim((string) $booking->player_name))[0] ?? '';
+            $this->messenger->updateClient($booking->contact, $booking->reference,
+                "Sorry {$first} 😕 {$booking->game->label()} is full. Want me to put you on the waiting list? I'll message you if a spot opens.");
+        }
+        foreach ($this->messenger->adminContacts() as $other) {
+            $this->messenger->alertAdmin($other, "❌ {$booking->reference} ({$booking->player_name}) told it's full by {$admin->adminName()}.");
+        }
     }
 
     /** New booking: the admin wants payment first. Ask for the link now (reply to that message with it). */

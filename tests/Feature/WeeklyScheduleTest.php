@@ -40,7 +40,8 @@ class WeeklyScheduleTest extends TestCase
 
         $byDay = collect($created)->keyBy(fn (Game $g) => $this->local($g));
         $mon = $byDay['Mon 2026-11-09 21:00'];
-        $this->assertSame(['published', '7v7', 53.0, 14], [$mon->status, $mon->format, (float) $mon->price, $mon->capacity]);
+        // Placeholder only: clients see it once the admins post the list.
+        $this->assertSame(['draft', '7v7', 53.0, 14], [$mon->status, $mon->format, (float) $mon->price, $mon->capacity]);
 
         $tue = $byDay['Tue 2026-11-10 21:00'];
         $this->assertSame(['draft', null], [$tue->status, $tue->format]);
@@ -131,6 +132,7 @@ class WeeklyScheduleTest extends TestCase
     {
         app(WeeklySchedule::class)->generate();
         $thu = Game::where('weekly_key', 'thursday@21:00')->sole();
+        $thu->update(['status' => 'published']); // the admins posted Thursday's game
         $client = Contact::create(['wa_id' => '971500000001', 'last_inbound_at' => now()]);
 
         $booking = app(\App\Services\Booking\BookingService::class)->create($client, $thu->id, 'Ali', 2)['booking'];

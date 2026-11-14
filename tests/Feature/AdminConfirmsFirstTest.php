@@ -52,8 +52,10 @@ class AdminConfirmsFirstTest extends TestCase
         $this->assertNull($booking->link_requested_at);
         Http::assertSent(fn (Request $r) => ($r->data()['to'] ?? null) === self::ADMIN_1
             && ($r->data()['interactive']['action']['buttons'][0]['reply']['title'] ?? null) === '✅ Confirm'
-            && ($r->data()['interactive']['action']['buttons'][1]['reply']['title'] ?? null) === '💳 Send link');
-        Http::assertNotSent(fn (Request $r) => ($r->data()['to'] ?? null) === self::CLIENT && str_contains($r->data()['text']['body'] ?? '', "You're in"));
+            && ($r->data()['interactive']['action']['buttons'][1]['reply']['title'] ?? null) === '💳 Confirm + link'
+            && ($r->data()['interactive']['action']['buttons'][2]['reply']['title'] ?? null) === '❌ Full');
+        // Nothing to the client until an admin decides.
+        Http::assertNotSent(fn (Request $r) => ($r->data()['to'] ?? null) === self::CLIENT);
 
         $this->tap("approve:{$booking->id}");
 
@@ -61,16 +63,31 @@ class AdminConfirmsFirstTest extends TestCase
         Http::assertSent(fn (Request $r) => ($r->data()['to'] ?? null) === self::CLIENT && str_contains($r->data()['text']['body'] ?? '', "You're in"));
     }
 
-    public function test_admin_chooses_to_send_a_link(): void
+    public function test_admin_confirms_and_sends_a_link(): void
     {
         $booking = $this->book();
-        $this->tap("reject:{$booking->id}");
+        $this->tap("cnflink:{$booking->id}");
 
         $booking->refresh();
-        $this->assertSame('pending_payment', $booking->status);
+        $this->assertSame('confirmed', $booking->status);
         $this->assertNotNull($booking->link_requested_at);
         Http::assertSent(fn (Request $r) => ($r->data()['to'] ?? null) === self::ADMIN_1
             && str_contains($r->data()['text']['body'] ?? '', 'needs a payment link'));
+
+        // Admin replies with the link: it goes to the confirmed client.
+        $this->whatsapp(self::ADMIN_1, "{$booking->reference} https://pay.ziina.com/abc");
+        Http::assertSent(fn (Request $r) => ($r->data()['to'] ?? null) === self::CLIENT
+            && str_contains($r->data()['text']['body'] ?? '', 'https://pay.ziina.com/abc'));
+    }
+
+    public function test_admin_says_full(): void
+    {
+        $booking = $this->book();
+        $this->whatsapp(self::ADMIN_1, "full {$booking->reference}");
+
+        $this->assertSame('rejected', $booking->fresh()->status);
+        Http::assertSent(fn (Request $r) => ($r->data()['to'] ?? null) === self::CLIENT
+            && str_contains($r->data()['text']['body'] ?? '', 'is full'));
     }
 
     private function tap(string $id): void

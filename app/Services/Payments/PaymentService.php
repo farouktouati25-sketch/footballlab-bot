@@ -131,8 +131,20 @@ class PaymentService
     /** An admin sent the link: pass it to the client and restart the hold from now. */
     public function attachLink(Booking $booking, string $url, Contact $admin): string
     {
-        if ($booking->status !== 'pending_payment') {
+        if (! in_array($booking->status, ['pending_payment', 'confirmed'], true)) {
             return "{$booking->reference} is {$booking->status}, link not sent.";
+        }
+        if ($booking->status === 'confirmed') {
+            // Confirmed by the team, paying by link: no hold, just the link.
+            if ($booking->payment_url) {
+                return "{$booking->reference} already got a link. Nothing sent.";
+            }
+            $booking->forceFill(['payment_url' => $url, 'link_sent_by' => $admin->wa_id])->save();
+            $b = $booking->fresh(['game', 'contact']);
+            $sent = $b->contact && $this->messenger->updateClient($b->contact, $b->reference,
+                "💳 Here's the payment link for your spot ({$b->amountLabel()}):\n{$url}\n\nSend the screenshot here after paying 👊");
+
+            return $sent ? "✅ Link sent to {$b->player_name} for {$b->reference}." : "⚠️ Couldn't deliver the link. Send it to +".($b->contact->wa_id ?? '?').' yourself.';
         }
         if ($booking->payment_url) {
             return "{$booking->reference} already got a link from ".($booking->link_sent_by ? '+'.$booking->link_sent_by : 'someone').'. Nothing sent.';

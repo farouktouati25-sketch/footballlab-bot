@@ -197,12 +197,9 @@ class AgentTools
         if (config('fbl.payments.mode') === 'admin_link' && config('fbl.payments.admin_confirms_first', true)) {
             $booking->update(['status' => 'awaiting_approval', 'payment_note' => Booking::NEW_BOOKING_NOTE, 'payment_reported_at' => now()]);
             app(\App\Services\Booking\ApprovalNotifier::class)->requestApproval($booking->fresh(['game', 'contact']));
+            $this->silent = true; // the client hears back only once an admin decides
 
-            return [
-                'booking_reference' => $booking->reference,
-                'status' => 'waiting_for_team',
-                'instructions' => 'Reply ONE short line like "Noted 👍 the team will confirm your spot shortly." Never say they are confirmed or in, and don\'t mention a payment link: the team either confirms or sends one.',
-            ];
+            return ['booking_reference' => $booking->reference, 'status' => 'waiting_for_team', 'instructions' => 'Done. Do not reply to the client.'];
         }
 
         $link = $this->payments->linkFor($booking);
@@ -282,12 +279,7 @@ class AgentTools
         if (! $this->bookings->reportPayment($booking, null, $note)) {
             return ['error' => 'Could not send this to the team (booking '.$booking->status.' or game full). Offer other games or the waiting list.'];
         }
-        if ($onSpot) {
-            // Old client paying on the spot: the team still confirms the spot (they get the approve buttons).
-            return ['ok' => true, 'status' => 'waiting_for_team',
-                'instructions' => 'Reply ONE short line like "Noted bro 👊 I\'ll confirm your spot shortly." Never say they are confirmed or in: the team confirms.'];
-        }
-        $this->silent = true;
+        $this->silent = true; // the team confirms first; the client hears back then
 
         return ['ok' => true, 'instructions' => 'Done. Do not reply to the client.'];
     }
