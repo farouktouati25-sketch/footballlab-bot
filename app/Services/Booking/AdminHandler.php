@@ -66,6 +66,24 @@ class AdminHandler
         $text = trim((string) $inbound->text);
         $lower = mb_strtolower($text);
 
+        // Admin replied to a client's question I forwarded: send the answer to the client.
+        if ($text !== '' && $inbound->replyToId) {
+            $quoted = \App\Models\Message::where('wa_message_id', $inbound->replyToId)->first();
+            if (($quoted?->payload['kind'] ?? null) === 'client_question' && ($client = Contact::find($quoted->payload['contact_id'] ?? 0))) {
+                $sent = $this->messenger->text($client, $text, 'admin');
+                $this->reply($admin, $sent
+                    ? '✅ Sent to '.($client->player_name ?: $client->name ?: '+'.$client->wa_id).'. I carry on the chat from there.'
+                    : "⚠️ Couldn't send it (their chat is closed, 24h rule). Message +{$client->wa_id} from your phone.");
+                foreach ($this->messenger->adminContacts() as $other) {
+                    if ($sent && $other->wa_id !== $admin->wa_id) {
+                        $this->messenger->alertAdmin($other, "{$admin->adminName()} answered +{$client->wa_id}: {$text}");
+                    }
+                }
+
+                return;
+            }
+        }
+
         if (preg_match('/^bot\s+(off|stop|on|start|status)$/i', $text, $m)) {
             $this->botSwitch($admin, mb_strtolower($m[1]));
 

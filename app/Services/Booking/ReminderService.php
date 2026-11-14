@@ -50,7 +50,8 @@ class ReminderService
         // No game posted for that day: the admins decide (post the game, and the client is told automatically).
         foreach ($this->messenger->adminContacts() as $admin) {
             $this->messenger->alertAdmin($admin, '🙋 '.($contact->player_name ?: $contact->name ?: 'A client').' (+'.$contact->wa_id.') wants to play on '
-                .$day->format('l j M').($players > 1 ? " ({$players} players)" : '').'. No game posted for that day yet: forward me the game when it\'s on and I\'ll tell them.');
+                .$day->format('l j M').($players > 1 ? " ({$players} players)" : '').".\nNo game posted for that day yet.\n↩️ Reply to THIS message with your answer and I'll send it to them (e.g. \"Yes we play Monday 9 PM, format confirmed tomorrow\"). When you post the game, I'll tell them too.",
+                ['contact_id' => $contact->id, 'kind' => 'client_question']);
         }
 
         return ['saved' => true, 'day' => $day->format('l j F'),
