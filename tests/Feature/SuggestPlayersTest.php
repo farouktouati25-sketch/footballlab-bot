@@ -35,7 +35,7 @@ class SuggestPlayersTest extends TestCase
         Booking::create(['contact_id' => null, 'source' => 'manual', 'game_id' => $sat->id, 'player_name' => 'Khalid', 'players' => 1, 'amount' => 53, 'status' => 'confirmed']);
 
         Contact::create(['wa_id' => self::ADMIN_1, 'last_inbound_at' => now()]);
-        $this->whatsapp(self::ADMIN_1, "suggest {$game->id}");
+        $this->whatsapp(self::ADMIN_1, 'suggest'); // no number: the next open game with spots
 
         // Nothing goes to players before the admin confirms.
         Http::assertNotSent(fn (Request $r) => in_array($r->data()['to'] ?? null, [$recent->wa_id, $sameDay->wa_id, $other->wa_id, $already->wa_id], true));
@@ -44,13 +44,15 @@ class SuggestPlayersTest extends TestCase
 
             return ($r->data()['to'] ?? null) === self::ADMIN_1
                 && str_contains($body, 'Players to invite')
+                && str_contains($body, '📱 ')
                 && str_contains($body, '+'.$sameDay->wa_id.' · played this weekday before')
                 && str_contains($body, '+'.$recent->wa_id.' · played in the last 3 days')
                 && str_contains($body, 'no number saved): Khalid')
                 && ! str_contains($body, $other->wa_id);
         });
         Http::assertSent(fn (Request $r) => ($r->data()['to'] ?? null) === self::ADMIN_1
-            && ($r->data()['interactive']['action']['buttons'][0]['reply']['id'] ?? null) === "inv:{$game->id}");
+            && ($r->data()['interactive']['action']['buttons'][0]['reply']['id'] ?? null) === "inv:{$game->id}"
+            && ($r->data()['interactive']['action']['buttons'][1]['reply']['title'] ?? null) === "👤 I'll invite");
 
         // Admin taps "Send invites": Ali (chatted within 24h) gets it; Omar comes back as a phone list.
         $this->whatsappRaw(self::ADMIN_1, ['type' => 'interactive',

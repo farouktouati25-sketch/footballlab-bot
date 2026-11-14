@@ -121,8 +121,31 @@ class AdminHandler
             return;
         }
 
-        if (preg_match('/^(suggest|send\s+invites?|invite)$/i', $text)) {
-            $this->reply($admin, "Which game? ".$this->openGamesLine(strtolower(strtok($text, ' ')) === 'suggest' ? 'suggest' : $lower));
+        // "suggest" alone: the next open game that still has spots.
+        if ($lower === 'suggest') {
+            $open = Game::upcoming()->limit(10)->get()->filter(fn (Game $g) => $g->spotsLeft() > 0)->values();
+            if ($open->isEmpty()) {
+                $this->reply($admin, 'No open game with free spots right now.');
+
+                return;
+            }
+            app(\App\Services\Booking\ReminderService::class)->suggestForGame($open->first(), $admin);
+            if ($open->count() > 1) {
+                $this->reply($admin, 'Other games: '.$open->slice(1, 4)->map(fn (Game $g) => "suggest {$g->id} ({$g->label()}, {$g->spotsLeft()} left)")->implode(' · '));
+            }
+
+            return;
+        }
+
+        if (preg_match('/^(send\s+invites?|bot\s+invites?|invite)$/i', $text)) {
+            $this->reply($admin, 'Which game? '.$this->openGamesLine('suggest'));
+
+            return;
+        }
+
+        if (preg_match('/^bot\s+invites?\s+(\d+)$/i', $text, $m)) {
+            $game = Game::find((int) $m[1]);
+            $this->reply($admin, $game ? app(\App\Services\Booking\ReminderService::class)->sendInvites($game, $admin) : "No game #{$m[1]}.");
 
             return;
         }
@@ -440,7 +463,7 @@ class AdminHandler
             'fmt' => $this->pickFormat($admin, $ref),
             'loc' => $this->pickVenue($admin, $ref),
             'inv' => $this->reply($admin, ($g = Game::find((int) $ref)) ? app(\App\Services\Booking\ReminderService::class)->sendInvites($g, $admin) : 'That game no longer exists.'),
-            'invno' => $this->reply($admin, '👍 OK, no invites sent. Text them from your phone; when they reply I take over.'),
+            'invno' => $this->reply($admin, ($g = Game::find((int) $ref)) ? app(\App\Services\Booking\ReminderService::class)->adminInvites($g) : 'That game no longer exists.'),
             'who' => $this->setClientType($admin, Contact::find((int) strtok($ref, ':')), (string) substr((string) strrchr($ref, ':'), 1)),
             default => $this->reply($admin, self::HELP),
         };

@@ -237,26 +237,50 @@ class ReminderService
         $lines = $rows->map(function ($r, $i) use ($why) {
             $c = Contact::find($r->contact_id);
 
-            return ($i + 1).'. '.($c?->player_name ?: $c?->name ?: 'Player').' · +'.($c?->wa_id ?? '?').' · '.($why[$r->reason] ?? $r->reason)
-                .($r->status === 'sent' ? ' ✅ messaged' : '');
+            // 🤖 = the bot can message them (they wrote to us in the last 24h), 📱 = only from your phone.
+            $mark = $r->status === 'sent' ? '✅' : ($c && $c->windowIsOpen() && ! $c->botIsPaused() ? '🤖' : '📱');
+
+            return "{$mark} ".($i + 1).'. '.($c?->player_name ?: $c?->name ?: 'Player').' · +'.($c?->wa_id ?? '?').' · '.($why[$r->reason] ?? $r->reason);
         })->implode("\n");
 
         $pending = $rows->where('status', 'manual')->count();
+        $botCan = $rows->where('status', 'manual')->filter(function ($r) {
+            $c = Contact::find($r->contact_id);
+
+            return $c && $c->windowIsOpen() && ! $c->botIsPaused();
+        })->count();
         $ok = false;
         foreach ($only ? [$only] : $this->messenger->adminContacts() as $admin) {
             $ok = $this->messenger->alertAdmin($admin,
-                "📣 Players to invite for #{$game->id} ({$game->label()}):\n\n{$lines}\n\n"
-                .($pending ? "Want me to send them a short invite?\n💬 \"{$this->inviteText($game, null)}\"" : 'Everyone on the list has been messaged ✅')
+                "📣 Players to invite for #{$game->id} ({$game->label()} · {$game->spotsLeft()} left):\n\n{$lines}\n\n"
+                .($pending ? "🤖 I can message {$botCan} · 📱 {$this->plural($pending - $botCan)} only from your phone.\n💬 \"{$this->inviteText($game, null)}\"" : 'Everyone on the list has been messaged ✅')
                 .$extra) || $ok;
             if ($pending && $admin->windowIsOpen()) {
-                $this->messenger->buttons($admin, "📨 Invite these {$pending} player(s) for #{$game->id}?",
-                    ['inv:'.$game->id => '📨 Send invites', 'invno:'.$game->id => 'No, I\'ll do it']);
+                $this->messenger->buttons($admin, "Who invites them for #{$game->id}?",
+                    ['inv:'.$game->id => '🤖 Bot invites', 'invno:'.$game->id => '👤 I\'ll invite']);
             } elseif ($pending) {
-                $this->messenger->alertAdmin($admin, "Reply: send invites {$game->id}");
+                $this->messenger->alertAdmin($admin, "Reply: bot invites {$game->id} · or invite them yourself");
             }
         }
 
         return $ok;
+    }
+
+    private function plural(int $n): string
+    {
+        return $n === 1 ? '1 player' : "{$n} players";
+    }
+
+    /** Admin chose to invite them himself: the list to copy, phone by phone. */
+    public function adminInvites(Game $game): string
+    {
+        $rows = DB::table('game_reminders')->where('game_id', $game->id)->where('status', 'manual')->get();
+        $lines = $rows->map(fn ($r) => Contact::find($r->contact_id))->filter()
+            ->map(fn (Contact $c) => '• '.($c->player_name ?: $c->name ?: 'Player').' · wa.me/'.$c->wa_id)->implode("\n");
+
+        return $lines === ''
+            ? 'Nobody left to invite.'
+            : "👤 OK, over to you. Tap a number to open the chat and send:\n💬 \"{$this->inviteText($game, null)}\"\n\n{$lines}\n\nWhen they reply, I take over and book them.";
     }
 
     /**
