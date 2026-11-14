@@ -85,6 +85,27 @@ class AdminHandler
             return;
         }
 
+        // History: lists of games already played, so the bot knows who plays (for suggestions and invites).
+        $pastKey = 'fbl:past_mode:'.$admin->wa_id;
+        if (in_array($lower, ['past', '#past', 'history', '#history'], true)) {
+            \Illuminate\Support\Facades\Cache::put($pastKey, true, now()->addMinutes(30));
+            $this->reply($admin, "📚 History mode ON (30 min). Forward me the lists of games you've already played (last 2–4 weeks), one post per message. I'll save who played. Send done when finished.");
+
+            return;
+        }
+        if (\Illuminate\Support\Facades\Cache::has($pastKey) && in_array($lower, ['done', 'past done', 'stop'], true)) {
+            \Illuminate\Support\Facades\Cache::forget($pastKey);
+            $this->reply($admin, '✅ History mode OFF. Forwarded posts are new games again.');
+
+            return;
+        }
+        if (str_starts_with($lower, '#past ') || (\Illuminate\Support\Facades\Cache::has($pastKey) && ($inbound->forwarded || mb_strlen($text) > 40))) {
+            \Illuminate\Support\Facades\Cache::put($pastKey, true, now()->addMinutes(30));
+            $this->importPast($admin, preg_replace('/^#past\s*/i', '', $text) ?? $text);
+
+            return;
+        }
+
         if ($inbound->forwarded || str_starts_with($lower, '#games') || str_starts_with($lower, '#schedule')) {
             $this->importSchedule($admin, preg_replace('/^#(games|schedule)\s*/i', '', $text) ?? $text);
 
@@ -502,6 +523,74 @@ class AdminHandler
         // 'done': ApprovalNotifier already messaged the client and all admins.
     }
 
+    /** A list of a game already played: save the game and its players (matched to saved contacts by name). */
+    private function importPast(Contact $admin, string $post): void
+    {
+        try {
+            $games = $this->parser->parse($post, true);
+        } catch (\Throwable $e) {
+            Log::error('History parse failed', ['error' => $e->getMessage()]);
+            $this->reply($admin, "I couldn't read that one. Try again in a minute.");
+
+            return;
+        }
+        if (! $games) {
+            $this->reply($admin, "I didn't find a past game in that (needs the day, time, pitch and the names). Still in history mode; send done to stop.");
+
+            return;
+        }
+
+        $lines = [];
+        foreach ($games as $g) {
+            $game = Game::whereBetween('starts_at', [$g['starts_at']->copy()->subMinutes(30), $g['starts_at']->copy()->addMinutes(30)])
+                ->where('status', '!=', 'cancelled')->get()
+                ->first(fn (Game $e) => Game::sameVenue($e->venue, $g['venue']))
+                ?? Game::create(['starts_at' => $g['starts_at'], 'venue' => $g['venue'], 'format' => $g['format'] ?? null,
+                    'price' => $g['price'], 'capacity' => max($g['capacity'], count($g['players'] ?? [])), 'status' => 'published']);
+
+            $have = $game->bookings()->where('status', 'confirmed')->pluck('player_name')
+                ->map(fn ($n) => mb_strtolower(trim((string) $n)))->all();
+            $added = 0;
+            $matched = 0;
+            foreach ($g['players'] ?? [] as $name) {
+                $key = mb_strtolower(trim($name));
+                if ($key === '' || in_array($key, $have, true)) {
+                    continue;
+                }
+                $contactId = self::contactIdForName($name);
+                Booking::create(['contact_id' => $contactId, 'source' => 'post', 'game_id' => $game->id,
+                    'player_name' => mb_substr(trim($name), 0, 120), 'players' => 1, 'amount' => (float) $game->price,
+                    'status' => 'confirmed', 'decided_by' => $admin->wa_id, 'decided_at' => now()]);
+                $have[] = $key;
+                $added++;
+                $matched += $contactId ? 1 : 0;
+            }
+            $lines[] = "• {$game->label()}: {$added} player(s) saved".($added ? ", {$matched} matched to a phone number" : '');
+        }
+
+        $this->reply($admin, "📚 Saved:\n".implode("\n", $lines)."\nKeep forwarding, or send done.");
+    }
+
+    /** One saved contact with exactly this name (or this first name, when only one person has it), else null. */
+    public static function contactIdForName(string $name): ?int
+    {
+        $n = mb_strtolower(trim(preg_replace('/\s+/u', ' ', $name)));
+        if ($n === '') {
+            return null;
+        }
+        $exact = Contact::whereRaw('LOWER(player_name) = ?', [$n])->orWhereRaw('LOWER(name) = ?', [$n])->pluck('id')->unique();
+        if ($exact->count() === 1) {
+            return $exact->first();
+        }
+        if ($exact->count() > 1 || str_contains($n, ' ')) {
+            return null;
+        }
+        $first = Contact::where(fn ($q) => $q->whereRaw('LOWER(player_name) LIKE ?', [$n.' %'])->orWhereRaw('LOWER(name) LIKE ?', [$n.' %']))
+            ->pluck('id')->unique();
+
+        return $first->count() === 1 ? $first->first() : null;
+    }
+
     private function importSchedule(Contact $admin, string $post): void
     {
         if (mb_strlen($post) < 10) {
@@ -685,10 +774,13 @@ class AdminHandler
     private function importSavedContacts(Contact $admin, InboundMessage $inbound): void
     {
         $numbers = [];
+        $names = []; // number => name in the phone
         if ($inbound->type === 'contacts') {
             foreach ((array) ($inbound->raw['contacts'] ?? []) as $card) {
                 foreach ((array) ($card['phones'] ?? []) as $phone) {
-                    $numbers[] = (string) ($phone['wa_id'] ?? $phone['phone'] ?? '');
+                    $n = (string) ($phone['wa_id'] ?? $phone['phone'] ?? '');
+                    $numbers[] = $n;
+                    $names[\App\Support\Phone::normalize($n)] = (string) ($card['name']['formatted_name'] ?? '');
                 }
             }
         } else {
@@ -699,6 +791,12 @@ class AdminHandler
                 return;
             }
             $numbers = self::vcfNumbers($vcf);
+            foreach (preg_split('/END:VCARD/i', $vcf) as $card) {
+                preg_match('/^FN[^:\r\n]*:(.+)$/mi', $card, $fn);
+                foreach (self::vcfNumbers($card) as $n) {
+                    $names[\App\Support\Phone::normalize($n)] = trim($fn[1] ?? '');
+                }
+            }
         }
 
         $admins = array_map(fn (Contact $a) => $a->wa_id, $this->messenger->adminContacts());
@@ -707,7 +805,10 @@ class AdminHandler
             if (strlen($wa) < 8 || in_array($wa, $admins, true) || $wa === ltrim((string) config('whatsapp.business_number'), '+')) {
                 continue;
             }
-            Contact::updateOrCreate(['wa_id' => $wa], ['saved_at' => now(), 'client_type' => 'old']);
+            $c = Contact::updateOrCreate(['wa_id' => $wa], ['saved_at' => now(), 'client_type' => 'old']);
+            if (! $c->name && ! empty($names[$wa])) {
+                $c->update(['name' => mb_substr($names[$wa], 0, 120)]); // the name in your phone, used to match names on game lists
+            }
             $saved++;
         }
 

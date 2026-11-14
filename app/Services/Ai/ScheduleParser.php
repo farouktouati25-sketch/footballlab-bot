@@ -12,7 +12,8 @@ class ScheduleParser
     /**
      * @return array<int, array{starts_at:Carbon, venue:string, format:?string, price:float, capacity:int, payment_link:?string, notes:?string, players:string[]}>
      */
-    public function parse(string $post): array
+    /** @param bool $past the post is about games already played (history import) */
+    public function parse(string $post, bool $past = false): array
     {
         $tz = config('fbl.timezone');
         $today = now()->setTimezone($tz)->format('l Y-m-d');
@@ -22,7 +23,7 @@ class ScheduleParser
 
         $system = <<<PROMPT
 You extract football games from a WhatsApp group announcement for FootballLab DXB.
-Today in Dubai is {$today}. Resolve weekday names to the NEXT occurrence (today counts if the time is still ahead).
+Today in Dubai is {$today}. {$this->dateRule($past)}
 Known venues (use these exact names when the post clearly refers to one): {$venues}.
 If price is missing use {$defaultPrice}.
 Capacity: if the post has a numbered player list, capacity = the number of numbered slots in the MAIN list (filled or empty), not counting the waiting list. Otherwise use the number of spots/players stated, or {$defaultCapacity}.
@@ -81,7 +82,9 @@ PROMPT;
             } catch (\Throwable) {
                 continue;
             }
-            if ($startsAt->isPast() || empty($g['venue'])) {
+            if (empty($g['venue']) || ($past
+                ? ($startsAt->isFuture() || $startsAt->lt(now()->subDays((int) config('fbl.history_import_days', 31))))
+                : $startsAt->isPast())) {
                 continue;
             }
             $link = isset($g['payment_link']) && filter_var($g['payment_link'], FILTER_VALIDATE_URL) ? $g['payment_link'] : null;
@@ -111,5 +114,12 @@ PROMPT;
     public static function mentionsTournament(string $text): bool
     {
         return (bool) preg_match('/tourn|torneo|tournoi|بطولة|\bcup\b|كأس/iu', $text);
+    }
+
+    private function dateRule(bool $past): string
+    {
+        return $past
+            ? 'These games were ALREADY PLAYED in the last few weeks. Resolve weekday names to the MOST RECENT PAST occurrence (today counts only if the time has already passed). If the post has a date, use it.'
+            : 'Resolve weekday names to the NEXT occurrence (today counts if the time is still ahead).';
     }
 }
