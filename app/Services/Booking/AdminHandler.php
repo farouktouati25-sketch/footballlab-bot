@@ -331,8 +331,16 @@ class AdminHandler
         match ($lower) {
             'games' => $this->listGames($admin),
             'pending' => $this->listPending($admin),
-            default => $this->reply($admin, self::HELP),
+            'help', 'menu', '?', 'commands' => $this->reply($admin, self::HELP),
+            default => $this->chat($admin, $text),
         };
+    }
+
+    /** Not a command: talk with the admin assistant (it reads the data and tells them which command to send). */
+    private function chat(Contact $admin, string $text): void
+    {
+        $answer = $text === '' ? null : app(\App\Services\Ai\AdminAssistant::class)->reply($admin, self::HELP);
+        $this->reply($admin, $answer ?: self::HELP);
     }
 
     /** Admin replies with a payment link: to the bot's request (quoted), with the reference, or the only open request. */
