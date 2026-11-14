@@ -82,7 +82,7 @@ class WeeklyScheduleTest extends TestCase
         Contact::where('wa_id', self::ADMIN_1)->update(['last_inbound_at' => now()]);
         $this->assertSame(1, app(WeeklySchedule::class)->askFormats());
         Http::assertSent(fn (Request $r) => ($r->data()['to'] ?? null) === self::ADMIN_1
-            && ($r->data()['interactive']['action']['buttons'][1]['reply']['id'] ?? null) === "fmt:{$tue->id}:8v8");
+            && ($r->data()['interactive']['action']['buttons'][0]['reply']['id'] ?? null) === "fmt:{$tue->id}:8v8");
 
         $this->whatsapp(self::ADMIN_1, ['type' => 'interactive',
             'interactive' => ['type' => 'button_reply', 'button_reply' => ['id' => "fmt:{$tue->id}:8v8", 'title' => '8v8']]]);
