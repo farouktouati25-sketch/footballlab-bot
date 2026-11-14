@@ -35,7 +35,7 @@ class TournamentTest extends TestCase
         Http::assertSent(fn (Request $r) => str_contains($r->data()['text']['body'] ?? '', 'asked about tournaments'));
 
         // A whole team books together.
-        $team = app(BookingService::class)->create($ali, $game->id, 'Team Lions (Ali)', 9);
+        $team = app(BookingService::class)->create($ali, $game->id, 'Team Ali', 9);
         $this->assertTrue($team['ok']);
     }
 }
