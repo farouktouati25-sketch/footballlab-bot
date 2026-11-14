@@ -192,6 +192,19 @@ class AgentTools
         }
 
         $booking = $result['booking'];
+
+        // The team decides first: confirm straight away (they know the player) or send a payment link.
+        if (config('fbl.payments.mode') === 'admin_link' && config('fbl.payments.admin_confirms_first', true)) {
+            $booking->update(['status' => 'awaiting_approval', 'payment_note' => Booking::NEW_BOOKING_NOTE, 'payment_reported_at' => now()]);
+            app(\App\Services\Booking\ApprovalNotifier::class)->requestApproval($booking->fresh(['game', 'contact']));
+
+            return [
+                'booking_reference' => $booking->reference,
+                'status' => 'waiting_for_team',
+                'instructions' => 'Reply ONE short line like "Noted 👍 the team will confirm your spot shortly." Never say they are confirmed or in, and don\'t mention a payment link: the team either confirms or sends one.',
+            ];
+        }
+
         $link = $this->payments->linkFor($booking);
         $booking = $booking->fresh(['game']);
         if (! $link && $booking->link_due_at && $booking->link_due_at->isFuture()) {

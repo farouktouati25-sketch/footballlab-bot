@@ -13,6 +13,15 @@ class Booking extends Model
     /** payment_note marker: client wants to pay later (after the game / cash at the pitch), not paid yet. */
     public const PAY_LATER_NOTE = 'PAY LATER';
 
+    /** Fresh booking waiting for an admin: confirm straight away, or send a payment link first. */
+    public const NEW_BOOKING_NOTE = 'NEW BOOKING';
+
+    public function isNewBookingRequest(): bool
+    {
+        return $this->status === 'awaiting_approval' && $this->payment_note === self::NEW_BOOKING_NOTE
+            && ! $this->payment_proof_media_id && ! $this->payment_verified;
+    }
+
     public function wantsCash(): bool
     {
         return str_starts_with((string) $this->payment_note, self::PAY_LATER_NOTE)

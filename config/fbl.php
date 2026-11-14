@@ -86,6 +86,8 @@ return [
         // ziina      = the bot creates the exact-amount link itself via the Ziina API (needs ZIINA_API_TOKEN).
         // fixed      = the game's link / FBL_DEFAULT_PAYMENT_LINK.
         'mode' => env('FBL_PAYMENT_MODE', 'admin_link'),
+        // Every new booking first goes to the admins: ✅ Confirm (no link needed) or 💳 Send link.
+        'admin_confirms_first' => (bool) env('FBL_ADMIN_CONFIRMS_FIRST', true),
         'ziina_token' => env('ZIINA_API_TOKEN', ''),
         'ziina_webhook_secret' => env('ZIINA_WEBHOOK_SECRET', ''),
         'ziina_test_mode' => (bool) env('ZIINA_TEST_MODE', false),

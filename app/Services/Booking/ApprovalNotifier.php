@@ -19,14 +19,16 @@ class ApprovalNotifier
         $game = $booking->game;
         $client = $booking->contact;
         $spotsAfter = $game->confirmedPlayers() + $booking->players;
-        $proof = $booking->wantsCash() && ! $booking->payment_proof_media_id && ! $booking->payment_verified
+        $proof = $booking->isNewBookingRequest()
+            ? 'not paid yet. ✅ Confirm = you know them, no link needed · 💳 Send link = they pay first'
+            : ($booking->wantsCash() && ! $booking->payment_proof_media_id && ! $booking->payment_verified
             ? '🕐 wants to PAY LATER, not paid yet'.(str_contains((string) $booking->payment_note, ':') ? ' ("'.trim(substr((string) $booking->payment_note, strpos((string) $booking->payment_note, ':') + 1)).'")' : '')
                 .'. Book = OK without paying first · Send link = they pay now'
             : ($booking->payment_verified
             ? 'PAID online via Ziina ✅ (verified)'
             : ($booking->payment_proof_media_id
             ? 'screenshot attached'
-            : 'client says paid, NO screenshot'.($booking->payment_note ? ' ('.$booking->payment_note.')' : '')));
+            : 'client says paid, NO screenshot'.($booking->payment_note ? ' ('.$booking->payment_note.')' : ''))));
 
         $summary = "🆕 Booking {$booking->reference} needs your OK\n"
             ."👤 {$booking->player_name} · +{$client->wa_id}\n"
@@ -37,7 +39,7 @@ class ApprovalNotifier
 
         $buttons = [
             'approve:'.$booking->id => $booking->wantsCash() && ! $booking->payment_proof_media_id ? '✅ Book him' : '✅ Confirm',
-            'reject:'.$booking->id => $booking->wantsCash() && ! $booking->payment_proof_media_id ? '💳 Send link' : '❌ Reject',
+            'reject:'.$booking->id => $booking->isNewBookingRequest() || ($booking->wantsCash() && ! $booking->payment_proof_media_id) ? '💳 Send link' : '❌ Reject',
         ];
 
         foreach ($this->messenger->adminContacts() as $admin) {

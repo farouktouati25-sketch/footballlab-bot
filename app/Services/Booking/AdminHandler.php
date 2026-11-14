@@ -469,6 +469,20 @@ class AdminHandler
         };
     }
 
+    /** New booking: the admin wants payment first. Ask for the link now (reply to that message with it). */
+    private function linkInstead(Contact $admin, Booking $booking): void
+    {
+        $moved = Booking::whereKey($booking->id)->where('status', 'awaiting_approval')->update([
+            'status' => 'pending_payment', 'payment_note' => null, 'payment_reported_at' => null, 'link_requested_at' => null, 'created_at' => now(),
+        ]);
+        if (! $moved) {
+            $this->notifier->alreadyDecided($admin, $booking->fresh());
+
+            return;
+        }
+        app(\App\Services\Payments\PaymentService::class)->requestLinkFromAdmins($booking->fresh(['game', 'contact']));
+    }
+
     private function payFirstInstead(Contact $admin, Booking $booking): void
     {
         $moved = Booking::whereKey($booking->id)->where('status', 'awaiting_approval')->update([
@@ -528,6 +542,11 @@ class AdminHandler
     {
         // "Pay later" refused: not a rejection, they just pay first like everyone else.
         $pending = Booking::with(['game', 'contact'])->find($bookingId);
+        if (! $approve && $pending && $pending->isNewBookingRequest()) {
+            $this->linkInstead($admin, $pending);
+
+            return;
+        }
         if (! $approve && $pending && $pending->status === 'awaiting_approval' && $pending->wantsCash()
             && ! $pending->payment_proof_media_id && ! $pending->payment_verified) {
             $this->payFirstInstead($admin, $pending);
