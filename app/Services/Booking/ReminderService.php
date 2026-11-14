@@ -193,8 +193,7 @@ class ReminderService
                 continue; // already invited for that day
             }
 
-            $canMessage = $contact->windowIsOpen() && ! $contact->botIsPaused();
-            $sent = $canMessage && $this->messenger->text($contact, $this->inviteText($game, $contact));
+            $sent = false; // the admin confirms first ("Send invites" button), then sendInvites() messages them
             $values = ['game_id' => $game->id, 'reason' => $recipients[$contact->id], 'status' => $sent ? 'sent' : 'manual',
                 'sent' => $sent, 'updated_at' => now()];
             $row
@@ -203,14 +202,14 @@ class ReminderService
             $sent ? $direct++ : $manual++;
         }
 
-        $this->sendInviteList($game, $admin, $direct, array_values($noNumber));
+        $this->sendInviteList($game, $admin, null, array_values($noNumber));
 
         return ['direct' => $direct, 'manual' => $manual, 'names' => array_values($noNumber)];
     }
 
-    private function inviteText(Game $game, Contact $contact): string
+    private function inviteText(Game $game, ?Contact $contact): string
     {
-        $first = trim((string) ($contact->player_name ?: $contact->name));
+        $first = trim((string) ($contact?->player_name ?: $contact?->name));
         $first = $first !== '' ? ' '.(preg_split('/\s+/u', $first)[0] ?? '') : '';
         $local = $game->localStart();
         $when = $local->isToday() ? 'tonight' : ($local->isTomorrow() ? 'tomorrow' : $local->format('l'));
@@ -242,15 +241,57 @@ class ReminderService
                 .($r->status === 'sent' ? ' ✅ messaged' : '');
         })->implode("\n");
 
+        $pending = $rows->where('status', 'manual')->count();
         $ok = false;
         foreach ($only ? [$only] : $this->messenger->adminContacts() as $admin) {
             $ok = $this->messenger->alertAdmin($admin,
                 "📣 Players to invite for #{$game->id} ({$game->label()}):\n\n{$lines}\n\n"
-                .($directNow !== null ? "✅ = I messaged them myself just now ({$directNow}). " : '')
-                ."Message the others from the phone. When they reply, I take over the chat and book them.".$extra) || $ok;
+                .($pending ? "Want me to send them a short invite?\n💬 \"{$this->inviteText($game, null)}\"" : 'Everyone on the list has been messaged ✅')
+                .$extra) || $ok;
+            if ($pending && $admin->windowIsOpen()) {
+                $this->messenger->buttons($admin, "📨 Invite these {$pending} player(s) for #{$game->id}?",
+                    ['inv:'.$game->id => '📨 Send invites', 'invno:'.$game->id => 'No, I\'ll do it']);
+            } elseif ($pending) {
+                $this->messenger->alertAdmin($admin, "Reply: send invites {$game->id}");
+            }
         }
 
         return $ok;
+    }
+
+    /**
+     * Admin tapped "Send invites": message everyone still on the list. WhatsApp only allows a free message to people
+     * who wrote to us in the last 24h; the others come back as a list for the admin to text from the phone.
+     *
+     * @return string reply for the admin
+     */
+    public function sendInvites(Game $game, Contact $admin): string
+    {
+        if ($game->status !== 'published' || $game->starts_at->isPast()) {
+            return "#{$game->id} isn't open anymore, nothing sent.";
+        }
+        $day = $game->localStart()->toDateString();
+        $busy = $this->busyOn($day);
+        $sent = [];
+        $phone = [];
+        foreach (DB::table('game_reminders')->where('game_id', $game->id)->where('status', 'manual')->get() as $row) {
+            $c = Contact::find($row->contact_id);
+            if (! $c || $c->reminders_opted_out_at || in_array($c->id, $busy, true)) {
+                continue;
+            }
+            $name = $c->player_name ?: $c->name ?: '+'.$c->wa_id;
+            if ($c->windowIsOpen() && ! $c->botIsPaused() && $this->messenger->text($c, $this->inviteText($game, $c))) {
+                DB::table('game_reminders')->where('id', $row->id)->update(['status' => 'sent', 'sent' => true, 'updated_at' => now()]);
+                $sent[] = $name;
+            } else {
+                $phone[] = "{$name} · +{$c->wa_id}";
+            }
+        }
+
+        return ($sent ? '📨 Invited '.count($sent).': '.implode(', ', $sent).'.' : '📨 Nobody I could message directly.')
+            .($phone ? "\n\n📱 WhatsApp doesn't let me message these (no chat with us in the last 24h). Send them the invite from your phone:\n"
+                .implode("\n", $phone)."\n\n💬 {$this->inviteText($game, null)}" : '')
+            .($sent ? "\nWhen they reply, I take over and book them." : '');
     }
 
     /**

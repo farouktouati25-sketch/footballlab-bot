@@ -31,7 +31,7 @@ class AdminHandler
         ."• pending → bookings waiting for your OK\n"
         ."• Payment link: reply to my 💳 request with the link (or send FBL-XXXXX https://…)\n"
         ."• confirm FBL-XXXXX / reject FBL-XXXXX\n"
-        ."• suggest 12 → game not filling up? I invite people who played in the last 3 days or on the same weekday (myself if they chatted in the last 24h, otherwise I list them for you)\n"
+        ."• suggest 12 → game not filling up? I list people who played in the last 3 days or on the same weekday; tap 📨 Send invites (or: send invites 12) and I message them\n"
         ."• chats → conversations waiting for you (I remind you after 15 min and 1 h until you reply)\n"
         ."• cancel game 12 → stop bookings for a game\n"
         ."• edit 12 format 8v8 / edit 12 price 60 / edit 12 spots 16 → change a game (format also opens a weekly game)\n"
@@ -107,6 +107,13 @@ class AdminHandler
             } else {
                 app(\App\Services\Booking\ReminderService::class)->suggestForGame($game, $admin);
             }
+
+            return;
+        }
+
+        if (preg_match('/^send\s+invites?\s+(\d+)$/i', $text, $m)) {
+            $game = Game::find((int) $m[1]);
+            $this->reply($admin, $game ? app(\App\Services\Booking\ReminderService::class)->sendInvites($game, $admin) : "No game #{$m[1]}.");
 
             return;
         }
@@ -405,6 +412,8 @@ class AdminHandler
             'wl_skip' => $this->waitlistAnswer($admin, (int) $ref, false),
             'fmt' => $this->pickFormat($admin, $ref),
             'loc' => $this->pickVenue($admin, $ref),
+            'inv' => $this->reply($admin, ($g = Game::find((int) $ref)) ? app(\App\Services\Booking\ReminderService::class)->sendInvites($g, $admin) : 'That game no longer exists.'),
+            'invno' => $this->reply($admin, '👍 OK, no invites sent. Text them from your phone; when they reply I take over.'),
             'who' => $this->setClientType($admin, Contact::find((int) strtok($ref, ':')), (string) substr((string) strrchr($ref, ':'), 1)),
             default => $this->reply($admin, self::HELP),
         };

@@ -37,22 +37,31 @@ class SuggestPlayersTest extends TestCase
         Contact::create(['wa_id' => self::ADMIN_1, 'last_inbound_at' => now()]);
         $this->whatsapp(self::ADMIN_1, "suggest {$game->id}");
 
-        // Ali chatted within 24h: the bot invites him itself.
-        Http::assertSent(fn (Request $r) => ($r->data()['to'] ?? null) === $recent->wa_id
-            && str_contains($r->data()['text']['body'] ?? '', 'Hey Ali 👋')
-            && str_contains($r->data()['text']['body'] ?? '', 'tomorrow at 9:00 PM'));
-        // Omar's window is closed: he is on the admin's list. Sami (other weekday) and Yusuf (already in) are not messaged.
-        Http::assertNotSent(fn (Request $r) => in_array($r->data()['to'] ?? null, [$sameDay->wa_id, $other->wa_id, $already->wa_id], true));
-        Http::assertSent(function (Request $r) use ($sameDay, $other) {
+        // Nothing goes to players before the admin confirms.
+        Http::assertNotSent(fn (Request $r) => in_array($r->data()['to'] ?? null, [$recent->wa_id, $sameDay->wa_id, $other->wa_id, $already->wa_id], true));
+        Http::assertSent(function (Request $r) use ($sameDay, $recent, $other) {
             $body = $r->data()['text']['body'] ?? '';
 
             return ($r->data()['to'] ?? null) === self::ADMIN_1
                 && str_contains($body, 'Players to invite')
                 && str_contains($body, '+'.$sameDay->wa_id.' · played this weekday before')
-                && str_contains($body, 'played in the last 3 days ✅ messaged')
+                && str_contains($body, '+'.$recent->wa_id.' · played in the last 3 days')
                 && str_contains($body, 'no number saved): Khalid')
                 && ! str_contains($body, $other->wa_id);
         });
+        Http::assertSent(fn (Request $r) => ($r->data()['to'] ?? null) === self::ADMIN_1
+            && ($r->data()['interactive']['action']['buttons'][0]['reply']['id'] ?? null) === "inv:{$game->id}");
+
+        // Admin taps "Send invites": Ali (chatted within 24h) gets it; Omar comes back as a phone list.
+        $this->whatsappRaw(self::ADMIN_1, ['type' => 'interactive',
+            'interactive' => ['type' => 'button_reply', 'button_reply' => ['id' => "inv:{$game->id}", 'title' => '📨 Send invites']]]);
+        Http::assertSent(fn (Request $r) => ($r->data()['to'] ?? null) === $recent->wa_id
+            && str_contains($r->data()['text']['body'] ?? '', 'Hey Ali 👋')
+            && str_contains($r->data()['text']['body'] ?? '', 'tomorrow at 9:00 PM'));
+        Http::assertNotSent(fn (Request $r) => in_array($r->data()['to'] ?? null, [$sameDay->wa_id, $other->wa_id, $already->wa_id], true));
+        Http::assertSent(fn (Request $r) => ($r->data()['to'] ?? null) === self::ADMIN_1
+            && str_contains($r->data()['text']['body'] ?? '', 'Invited 1: Ali Hassan')
+            && str_contains($r->data()['text']['body'] ?? '', 'Omar · +'.$sameDay->wa_id));
     }
 
     private function game(string $local): Game
@@ -71,11 +80,16 @@ class SuggestPlayersTest extends TestCase
 
     private function whatsapp(string $from, string $text): void
     {
+        $this->whatsappRaw($from, ['type' => 'text', 'text' => ['body' => $text]]);
+    }
+
+    private function whatsappRaw(string $from, array $message): void
+    {
         $json = json_encode(['entry' => [['changes' => [[
             'field' => 'messages',
             'value' => [
                 'contacts' => [['wa_id' => $from, 'profile' => ['name' => 'Admin']]],
-                'messages' => [['id' => 'wamid.in.'.uniqid(), 'from' => $from, 'timestamp' => (string) time(), 'type' => 'text', 'text' => ['body' => $text]]],
+                'messages' => [$message + ['id' => 'wamid.in.'.uniqid(), 'from' => $from, 'timestamp' => (string) time()]],
             ],
         ]]]]]);
 
