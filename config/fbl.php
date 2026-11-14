@@ -131,4 +131,5 @@ return [
 
     // Max players one booking can hold.
     'max_players_per_booking' => (int) env('FBL_MAX_PLAYERS_PER_BOOKING', 6),
+    'max_players_per_team' => (int) env('FBL_MAX_PLAYERS_PER_TEAM', 12), // tournaments: a team books together
 ];

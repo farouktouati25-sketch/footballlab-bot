@@ -99,6 +99,11 @@ class ReminderService
             $recipients[$row->contact_id] ??= $last->copy()->setTimezone(config('fbl.timezone'))->dayOfWeek === $local->dayOfWeek ? 'same_day' : 'lapsed';
         }
 
+        if ($game->format === 'tournament') {
+            Contact::whereNotNull('tournament_interest_at')->pluck('id')
+                ->each(function ($id) use (&$recipients) { $recipients[$id] = 'tournament'; });
+        }
+
         if (! $recipients) {
             return 0;
         }
@@ -183,6 +188,10 @@ class ReminderService
         }
         AvailabilityRequest::where('play_date', $day)->pluck('contact_id')
             ->each(function ($id) use (&$recipients) { $recipients[$id] = 'asked'; });
+        if ($game->format === 'tournament') {
+            Contact::whereNotNull('tournament_interest_at')->pluck('id')
+                ->each(function ($id) use (&$recipients) { $recipients[$id] = 'tournament'; });
+        }
         Contact::whereNotNull('preferred_days')->get(['id', 'preferred_days'])
             ->filter(fn (Contact $c) => in_array($local->dayOfWeek, array_map('intval', (array) $c->preferred_days), true))
             ->each(function (Contact $c) use (&$recipients) { $recipients[$c->id] ??= 'usual_day'; });
@@ -237,7 +246,7 @@ class ReminderService
     public function sendInviteList(Game $game, ?Contact $only = null, ?int $directNow = null, array $namesWithoutNumber = []): bool
     {
         $rows = DB::table('game_reminders')->where('game_id', $game->id)->whereIn('status', ['manual', 'sent'])->get();
-        $rank = ['asked' => 0, 'usual_day' => 1, 'recent' => 2, 'same_day' => 3, 'lapsed' => 4];
+        $rank = ['tournament' => 0, 'asked' => 0, 'usual_day' => 1, 'recent' => 2, 'same_day' => 3, 'lapsed' => 4];
         $rows = $rows->sortBy(fn ($r) => [$r->status === 'sent' ? 1 : 0, $rank[$r->reason] ?? 9, $r->id])->values();
         $extra = $namesWithoutNumber ? "\n\nAlso played recently (from your group lists, no number saved): ".implode(', ', $namesWithoutNumber) : '';
         if ($rows->isEmpty()) {
@@ -248,7 +257,7 @@ class ReminderService
             return false;
         }
 
-        $why = ['asked' => 'asked for this day', 'usual_day' => 'usually free this day', 'recent' => 'played in the last 3 days', 'same_day' => 'played this weekday before', 'lapsed' => 'played in the last weeks'];
+        $why = ['tournament' => 'asked about tournaments', 'asked' => 'asked for this day', 'usual_day' => 'usually free this day', 'recent' => 'played in the last 3 days', 'same_day' => 'played this weekday before', 'lapsed' => 'played in the last weeks'];
         $lines = $rows->map(function ($r, $i) use ($why) {
             $c = Contact::find($r->contact_id);
 

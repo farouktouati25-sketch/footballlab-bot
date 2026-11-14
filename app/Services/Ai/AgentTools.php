@@ -82,6 +82,13 @@ class AgentTools
                 ],
             ],
             [
+                'name' => 'tournament_interest',
+                'description' => 'The client wants to play a tournament but none is published. Saves it: they are invited first when the next tournament is posted.',
+                'input_schema' => ['type' => 'object', 'properties' => (object) [
+                    'with_team' => ['type' => 'boolean', 'description' => 'true if they come with a team, false if alone, omit if unknown'],
+                ]],
+            ],
+            [
                 'name' => 'remember_availability',
                 'description' => 'The client wants to play on a day that has no published game yet (or no games are published at all). Saves the date; when the game for that day is posted they get a message automatically. Resolve phrases like "next Friday" to a date using the current Dubai date.',
                 'input_schema' => [
@@ -139,6 +146,11 @@ class AgentTools
             'pay_later', 'pay_cash_on_spot' => $this->payLater($contact, $input),
             'my_bookings' => $this->myBookings($contact),
             'save_player_profile' => $this->reminders->saveProfile($contact, isset($input['name']) ? (string) $input['name'] : null, (array) ($input['days'] ?? [])),
+            'tournament_interest' => (function () use ($contact) {
+                $contact->update(['tournament_interest_at' => now()]);
+
+                return ['saved' => true, 'note' => 'Tell them in one short line we\'ll let them know when the next tournament is on.'];
+            })(),
             'remember_availability' => $this->reminders->remember($contact, (string) ($input['date'] ?? ''), (int) ($input['players'] ?? 1)),
             'join_waitlist' => $this->joinWaitlist($contact, $input),
             'cancel_booking' => $this->cancelBooking($contact, $input),

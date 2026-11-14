@@ -16,6 +16,9 @@ class BookingService
     public function create(Contact $contact, int $gameId, string $playerName, int $players): array
     {
         $max = (int) config('fbl.max_players_per_booking', 6);
+        if (Game::whereKey($gameId)->value('format') === 'tournament') {
+            $max = (int) config('fbl.max_players_per_team', 12); // a whole team signs up together
+        }
         if ($players < 1 || $players > $max) {
             return ['ok' => false, 'error' => "Players must be between 1 and {$max}. For bigger groups hand off to a human."];
         }
