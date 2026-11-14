@@ -16,6 +16,8 @@ return [
         'venue_maps' => [
             'al safa' => env('FBL_MAP_AL_SAFA', 'https://maps.app.goo.gl/Uo2jFF9MCQWcXGgz5'),
             'dubai schools' => env('FBL_MAP_DUBAI_SCHOOLS', 'https://maps.app.goo.gl/d3tcegj5gMRPURQ8A'),
+            'north london' => env('FBL_MAP_NAD_AL_SHEBA', 'https://maps.app.goo.gl/4kBpxxiH3wwMstzq9'),
+            'nad al sheba' => env('FBL_MAP_NAD_AL_SHEBA', 'https://maps.app.goo.gl/4kBpxxiH3wwMstzq9'),
         ],
         'group_link' => env('FBL_GROUP_LINK', 'https://chat.whatsapp.com/BIJG7gpzJWIDLD6UsYZPHR'),
         'membership' => 'No membership, no commitment: players book only the games they want.',
