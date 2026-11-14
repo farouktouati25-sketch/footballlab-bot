@@ -13,6 +13,18 @@ class Booking extends Model
     /** payment_note marker: client wants to pay later (after the game / cash at the pitch), not paid yet. */
     public const PAY_LATER_NOTE = 'PAY LATER';
 
+    /** Shown after a goalkeeper's name on the list. */
+    public const GK_MARK = '🧤';
+
+    /** Name without the keeper mark, for comparing names ("Omar 🧤" = "Omar" = "Omar (GK)"). */
+    public static function plainName(string $name): string
+    {
+        $n = str_replace(self::GK_MARK, '', $name);
+        $n = preg_replace('/\((gk|goalkeeper|keeper)\)|\b(gk)\b/iu', '', $n) ?? $n;
+
+        return mb_strtolower(trim(preg_replace('/\s+/u', ' ', $n) ?? $n));
+    }
+
     /** Fresh booking waiting for an admin: confirm straight away, or send a payment link first. */
     public const NEW_BOOKING_NOTE = 'NEW BOOKING';
 

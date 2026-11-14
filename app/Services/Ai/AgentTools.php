@@ -39,6 +39,7 @@ class AgentTools
                         'game_id' => ['type' => 'integer'],
                         'player_name' => ['type' => 'string', 'description' => 'Name the booking is under'],
                         'players' => ['type' => 'integer', 'description' => 'Number of players including the client', 'minimum' => 1],
+                        'goalkeeper' => ['type' => 'boolean', 'description' => 'true if the client will play in goal (marked 🧤 on the list)'],
                     ],
                     'required' => ['game_id', 'player_name', 'players'],
                 ],
@@ -192,10 +193,14 @@ class AgentTools
 
     private function createBooking(Contact $contact, array $input): array
     {
+        $name = trim((string) ($input['player_name'] ?? ''));
+        if (! empty($input['goalkeeper']) && $name !== '' && ! str_contains($name, \App\Models\Booking::GK_MARK)) {
+            $name .= ' '.\App\Models\Booking::GK_MARK; // keepers are marked on the list
+        }
         $result = $this->bookings->create(
             $contact,
             (int) ($input['game_id'] ?? 0),
-            (string) ($input['player_name'] ?? ''),
+            $name,
             (int) ($input['players'] ?? 1),
         );
 

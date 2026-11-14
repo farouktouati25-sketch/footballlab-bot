@@ -188,7 +188,7 @@ class BookingService
     public function syncPostPlayers(Game $game, array $names, Contact $admin): array
     {
         return DB::transaction(function () use ($game, $names, $admin) {
-            $norm = fn (string $n) => mb_strtolower(preg_replace('/\s+/u', ' ', trim($n)));
+            $norm = fn (string $n) => Booking::plainName($n); // "Omar 🧤" in my list = "Omar" in your post
 
             // Current rows, expanded the same way the list shows them ("Ali", "Ali +1").
             $current = [];
