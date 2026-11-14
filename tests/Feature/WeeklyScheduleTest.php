@@ -76,7 +76,7 @@ class WeeklyScheduleTest extends TestCase
         app(WeeklySchedule::class)->generate();
         $tue = Game::where('weekly_key', 'tuesday@21:00')->sole();
 
-        $this->assertSame(0, app(WeeklySchedule::class)->askFormats()); // Sunday: too early
+        $this->assertSame(1, app(WeeklySchedule::class)->askFormats()); // only tonight's Sunday game (asked since Saturday noon); Tuesday too early
 
         $this->travelTo(Carbon::parse('2026-11-09 12:05', 'Asia/Dubai'));
         Contact::where('wa_id', self::ADMIN_1)->update(['last_inbound_at' => now()]);
