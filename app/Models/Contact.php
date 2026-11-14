@@ -60,7 +60,7 @@ class Contact extends Model
 
     public function botIsPaused(): bool
     {
-        return $this->isSaved() || ($this->bot_paused_until !== null && $this->bot_paused_until->isFuture());
+        return $this->bot_paused_until !== null && $this->bot_paused_until->isFuture();
     }
 
     /** An admin said this is an old client, or they already played with us (a confirmed booking): they may pay on the spot. */
@@ -70,7 +70,7 @@ class Contact extends Model
             || $this->bookings()->where('status', 'confirmed')->exists();
     }
 
-    /** Saved in the admins' phone (an old client): the bot never replies or messages them; the team does. */
+    /** Saved in the admins' phone = an old client (the bot treats them as a regular). */
     public function isSaved(): bool
     {
         return $this->saved_at !== null && ! $this->isAdmin();

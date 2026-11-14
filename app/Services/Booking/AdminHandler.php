@@ -36,7 +36,7 @@ class AdminHandler
         ."• cancel game 12 → stop bookings for a game\n"
         ."• edit 12 format 8v8 / edit 12 price 60 / edit 12 spots 16 → change a game (format also opens a weekly game)\n"
         ."• pause 9715… / resume 9715… → bot off/on for a client\n"
-        ."• Old clients: share their contact cards (or a .vcf) with me, or send saved 9715… → the bot never talks to them (unsave 9715… to undo)\n"
+        ."• Old clients: share their contact cards (or a .vcf) with me, or send saved 9715… → the bot treats them as regulars (unsave 9715… to undo)\n"
         ."• #test → chat with the bot as a client (send #test again to exit)";
 
     public function __construct(
@@ -200,10 +200,10 @@ class AdminHandler
             $wa = \App\Support\Phone::normalize($m[2]);
             $client = Contact::firstOrCreate(['wa_id' => $wa]);
             $save = in_array(mb_strtolower($m[1]), ['saved', 'known'], true);
-            $client->update(['saved_at' => $save ? now() : null] + ($save ? ['handoff_at' => null] : []));
+            $client->update($save ? ['saved_at' => now(), 'client_type' => 'old'] : ['saved_at' => null, 'client_type' => null]);
             $this->reply($admin, $save
-                ? "📇 +{$wa} marked as a saved client: the bot won't reply to them or message them."
-                : "🤖 +{$wa} is handled by the bot again.");
+                ? "📇 +{$wa} saved as an old client: the bot treats them as a regular (pay on the spot or by link)."
+                : "🤖 +{$wa} is no longer marked as an old client.");
 
             return;
         }
@@ -215,7 +215,7 @@ class AdminHandler
         }
 
         if ($lower === 'saved') {
-            $this->reply($admin, '📇 '.Contact::whereNotNull('saved_at')->count().' saved clients the bot leaves alone. Send contact cards or a .vcf file to add more.');
+            $this->reply($admin, '📇 '.Contact::whereNotNull('saved_at')->count().' saved old clients (treated as regulars). Send contact cards or a .vcf file to add more.');
 
             return;
         }
@@ -664,12 +664,12 @@ class AdminHandler
             if (strlen($wa) < 8 || in_array($wa, $admins, true) || $wa === ltrim((string) config('whatsapp.business_number'), '+')) {
                 continue;
             }
-            Contact::updateOrCreate(['wa_id' => $wa], ['saved_at' => now()]);
+            Contact::updateOrCreate(['wa_id' => $wa], ['saved_at' => now(), 'client_type' => 'old']);
             $saved++;
         }
 
         $this->reply($admin, $saved
-            ? "📇 {$saved} saved client(s): the bot won't reply to them or message them. Undo one with: unsave 9715…"
+            ? "📇 {$saved} old client(s) saved: the bot treats them as regulars (no welcome, pay on the spot or by link). Undo one with: unsave 9715…"
             : "I didn't find any phone numbers in that.");
     }
 

@@ -34,23 +34,25 @@ class SavedContactsTest extends TestCase
         Contact::create(['wa_id' => self::ADMIN_1, 'last_inbound_at' => now()]);
     }
 
-    public function test_contact_card_from_admin_silences_the_bot_for_that_client(): void
+    public function test_contact_card_from_admin_makes_them_an_old_client(): void
     {
         $this->whatsapp(self::ADMIN_1, ['type' => 'contacts', 'contacts' => [
             ['name' => ['formatted_name' => 'Isa'], 'phones' => [['phone' => '+971 50 111 2222', 'wa_id' => '971501112222', 'type' => 'CELL']]],
         ]]);
-        $this->assertNotNull(Contact::where('wa_id', '971501112222')->sole()->saved_at);
+        $isa = Contact::where('wa_id', '971501112222')->sole();
+        $this->assertSame('old', $isa->client_type);
+        $this->assertTrue($isa->canPayOnSpot());
         Http::assertSent(fn (Request $r) => ($r->data()['to'] ?? null) === self::ADMIN_1
-            && str_contains($r->data()['text']['body'] ?? '', '1 saved client'));
+            && str_contains($r->data()['text']['body'] ?? '', '1 old client'));
 
-        $reads = fn () => Http::recorded(fn (Request $r) => ($r->data()['status'] ?? null) === 'read')->count();
-        $readsBefore = $reads(); // the admin's own message gets blue ticks
         $this->whatsapp('971501112222', ['type' => 'text', 'text' => ['body' => 'Hey bro, any game tonight?']]);
 
-        // No reply, no blue ticks, Claude not even asked.
-        Http::assertNotSent(fn (Request $r) => ($r->data()['to'] ?? null) === '971501112222');
-        Http::assertNotSent(fn (Request $r) => str_contains($r->url(), 'anthropic'));
-        $this->assertSame($readsBefore, $reads());
+        // The bot answers as with a regular: returning stage, cash allowed, no "who is this?" question to admins.
+        Http::assertSent(fn (Request $r) => ($r->data()['to'] ?? null) === '971501112222');
+        Http::assertSent(fn (Request $r) => str_contains($r->url(), 'anthropic')
+            && str_contains(json_encode($r->data()), 'RETURNING player')
+            && str_contains(json_encode($r->data()), 'this client may pay on the spot'));
+        Http::assertNotSent(fn (Request $r) => str_contains(json_encode($r->data(), JSON_UNESCAPED_UNICODE), 'Do you know +971501112222'));
     }
 
     public function test_vcf_file_and_commands(): void
