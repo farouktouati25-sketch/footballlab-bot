@@ -129,6 +129,7 @@ class BookingAgent
         $now = now()->setTimezone($tz)->format('l j F Y, g:i A');
         $facts = config('fbl.facts');
         $venues = implode("\n", array_map(fn ($v) => "- {$v}", $facts['venues']));
+        $maps = implode("\n", array_map(fn ($k, $url) => "  - Venue name contains \"{$k}\": {$url}", array_keys($facts['venue_maps'] ?? []), $facts['venue_maps'] ?? []));
         $currency = config('fbl.currency');
         $maxPlayers = (int) config('fbl.max_players_per_booking', 6);
         $name = $contact->player_name
@@ -194,6 +195,8 @@ FACTS YOU MAY STATE (nothing else about the business):
 - {$facts['membership']}
 - Venues:
 {$venues}
+- Location pins (when they ask where it is / location / pin / map, send the pin of THEIR game's venue right away, in one short line; don't hand off for this). If their game's venue matches none of these, hand off:
+{$maps}
 - Community group with game announcements: {$facts['group_link']}{$extra}
 - Optional credit packs (prepaid, for regulars):
 {$packs}

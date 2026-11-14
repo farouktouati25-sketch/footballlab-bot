@@ -12,6 +12,11 @@ return [
             'FBL_VENUES',
             'Dubai Schools Al Barsha|Al Safa Sports Ground'
         ))))),
+        // Google Maps pins, sent when someone asks where a pitch is. Key = words found in the game's venue name.
+        'venue_maps' => [
+            'al safa' => env('FBL_MAP_AL_SAFA', 'https://maps.app.goo.gl/Uo2jFF9MCQWcXGgz5'),
+            'dubai schools' => env('FBL_MAP_DUBAI_SCHOOLS', 'https://maps.app.goo.gl/d3tcegj5gMRPURQ8A'),
+        ],
         'group_link' => env('FBL_GROUP_LINK', 'https://chat.whatsapp.com/BIJG7gpzJWIDLD6UsYZPHR'),
         'membership' => 'No membership, no commitment: players book only the games they want.',
         'extra' => env('FBL_EXTRA_FACTS', ''),

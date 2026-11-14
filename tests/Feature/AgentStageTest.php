@@ -29,6 +29,9 @@ class AgentStageTest extends TestCase
         $this->assertStringContainsString("Never ask if they've played WITH US", $prompt);
         $this->assertStringContainsString('Suggest joining our community group', $prompt);
         $this->assertStringContainsString("we'll send them a reminder for that game", $prompt);
+        $this->assertStringNotContainsString('every week', $prompt);
+        $this->assertStringContainsString('https://maps.app.goo.gl/Uo2jFF9MCQWcXGgz5', $prompt);
+        $this->assertStringContainsString('https://maps.app.goo.gl/d3tcegj5gMRPURQ8A', $prompt);
     }
 
     public function test_known_players_skip_the_intro(): void
