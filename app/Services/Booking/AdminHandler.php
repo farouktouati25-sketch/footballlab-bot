@@ -31,7 +31,7 @@ class AdminHandler
         ."• pending → bookings waiting for your OK\n"
         ."• Payment link: reply to my 💳 request with the link (or send FBL-XXXXX https://…)\n"
         ."• confirm FBL-XXXXX / reject FBL-XXXXX\n"
-        ."• suggest 12 → game not filling up? I list people who played in the last 3 days or on the same weekday; tap 📨 Send invites (or: send invites 12) and I message them\n"
+        ."• suggest + game number (e.g. suggest 24; send just suggest to see the numbers) → game not filling up? I list people who played in the last 3 days or on the same weekday; tap 📨 Send invites and I message them\n"
         ."• chats → conversations waiting for you (I remind you after 15 min and 1 h until you reply)\n"
         ."• cancel game 12 → stop bookings for a game\n"
         ."• edit 12 format 8v8 / edit 12 price 60 / edit 12 spots 16 → change a game (format also opens a weekly game)\n"
@@ -121,10 +121,16 @@ class AdminHandler
             return;
         }
 
-        if (preg_match('/^suggest\s+(\d+)$/i', $text, $m)) {
+        if (preg_match('/^(suggest|send\s+invites?|invite)$/i', $text)) {
+            $this->reply($admin, "Which game? ".$this->openGamesLine(strtolower(strtok($text, ' ')) === 'suggest' ? 'suggest' : $lower));
+
+            return;
+        }
+
+        if (preg_match('/^suggest\s+#?(\d+)$/i', $text, $m)) {
             $game = Game::find((int) $m[1]);
             if (! $game || $game->status !== 'published' || $game->starts_at->isPast()) {
-                $this->reply($admin, "No open upcoming game #{$m[1]}.");
+                $this->reply($admin, "#{$m[1]} isn't an open upcoming game. ".$this->openGamesLine('suggest'));
             } else {
                 app(\App\Services\Booking\ReminderService::class)->suggestForGame($game, $admin);
             }
@@ -523,6 +529,17 @@ class AdminHandler
         // 'done': ApprovalNotifier already messaged the client and all admins.
     }
 
+    /** "Open games: suggest 24 (Sat 7:50 PM · 8v8 · 2 left) · suggest 10 (…)" */
+    private function openGamesLine(string $command): string
+    {
+        $games = Game::upcoming()->limit(6)->get();
+        if ($games->isEmpty()) {
+            return 'There are no open upcoming games right now.';
+        }
+
+        return "Open games:\n".$games->map(fn (Game $g) => "• {$command} {$g->id} → {$g->label()} · {$g->spotsLeft()} left")->implode("\n");
+    }
+
     /** A list of a game already played: save the game and its players (matched to saved contacts by name). */
     private function importPast(Contact $admin, string $post): void
     {
@@ -661,12 +678,15 @@ class AdminHandler
 
                 // Same game already live? Then this post is an updated list: sync it instead of creating a duplicate.
                 // Two games at the same time and place (Game 1 / Game 2): each list goes to its own game.
-                $candidates = Game::where('starts_at', $g['starts_at'])
+                // Same time and pitch, or the automatic weekly game of that evening (its time and pitch can move: 19:50 vs 20:00, Al Safa vs Dubai Schools).
+                $candidates = Game::where(fn ($q) => $q->where('starts_at', $g['starts_at'])
+                        ->orWhere(fn ($q) => $q->whereNotNull('weekly_key')
+                            ->whereBetween('starts_at', [$g['starts_at']->copy()->subHours(2), $g['starts_at']->copy()->addHours(2)])))
                     ->where(fn ($q) => $q->where('status', 'published')
                         ->orWhere(fn ($q) => $q->where('status', 'draft')->whereNotNull('weekly_key')))
                     ->orderBy('id')
                     ->get()
-                    ->filter(fn (Game $e) => $this->sameVenue($e->venue, $g['venue']))
+                    ->filter(fn (Game $e) => $e->weekly_key || $this->sameVenue($e->venue, $g['venue']))
                     ->values();
                 $free = $candidates->reject(fn (Game $e) => in_array($e->id, $usedExisting, true));
                 $part = $parts[$k] ?? null;
@@ -685,6 +705,9 @@ class AdminHandler
                     $publishWeekly = $existing->status === 'draft';
                     $formatChanged = ! empty($g['format']) && $g['format'] !== $existing->format;
                     $existing->update($listMeta + array_filter([
+                        'starts_at' => $existing->weekly_key ? $g['starts_at'] : null,
+                        'venue' => $existing->weekly_key ? $g['venue'] : null,
+                        'venue_confirmed_at' => $existing->weekly_key ? now() : null,
                         'capacity' => $g['capacity'],
                         'source_text' => $single ? $post : $existing->source_text,
                         'format' => $publishWeekly || $formatChanged ? ($g['format'] ?? null) : null,

@@ -114,6 +114,31 @@ class MultiGamePostTest extends TestCase
         $this->assertSame(['tournament', 24], [$g1->fresh()->format, $g1->fresh()->capacity]);
     }
 
+    public function test_a_post_at_1950_takes_over_the_automatic_2000_game(): void
+    {
+        $date = now('Asia/Dubai')->addDay()->format('Y-m-d');
+        $weekly = Game::create(['starts_at' => Carbon::parse("{$date} 20:00", 'Asia/Dubai')->utc(), 'venue' => 'Dubai Schools Al Barsha', 'format' => '11v11',
+            'price' => 58, 'capacity' => 22, 'status' => 'published', 'weekly_key' => 'saturday@20:00']);
+
+        Http::fake(function (Request $r) use ($date) {
+            if (str_contains($r->url(), 'anthropic')) {
+                return Http::response(['content' => [['type' => 'tool_use', 'id' => 's1', 'name' => 'save_games', 'input' => ['games' => [
+                    ['date' => $date, 'start_time' => '19:50', 'venue' => 'Al Safa Sports Ground', 'price' => 53, 'capacity' => 16, 'format' => '8v8', 'players' => ['Ali']],
+                    ['date' => $date, 'start_time' => '19:50', 'venue' => 'Al Safa Sports Ground', 'price' => 53, 'capacity' => 16, 'format' => '8v8', 'players' => ['Sami']],
+                ]]]], 'stop_reason' => 'tool_use']);
+            }
+
+            return Http::response(['messages' => [['id' => 'wamid.out.'.uniqid()]]]);
+        });
+
+        Contact::create(['wa_id' => self::ADMIN_1, 'last_inbound_at' => now()]);
+        $this->whatsapp(self::ADMIN_1, ['type' => 'text', 'text' => ['body' => "SATURDAY 8V8\nGAME 1\n1. Ali\n2.\nGAME 2\n1. Sami\n2."], 'context' => ['forwarded' => true]]);
+
+        $weekly->refresh();
+        $this->assertSame(['8v8', 'Al Safa Sports Ground', '19:50'], [$weekly->format, $weekly->venue, $weekly->localStart()->format('H:i')]);
+        $this->assertSame(2, Game::where('status', 'published')->count()); // Game 1 = the weekly game, Game 2 new; no stray 20:00 11v11
+    }
+
     private function whatsapp(string $from, array $message): void
     {
         $json = json_encode(['entry' => [['changes' => [[
