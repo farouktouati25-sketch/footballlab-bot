@@ -27,9 +27,10 @@ class GoalkeeperTest extends TestCase
         $this->assertSame('Omar 🧤', $booking->player_name);
         $booking->update(['status' => 'confirmed']);
 
-        // The admin's post lists him as plain "Omar": not added twice.
-        app(BookingService::class)->syncPostPlayers($game, ['Omar', 'Ali'], $admin);
+        // The post lists the keeper as "Omar (GK)" (same person) and another player also called Omar.
+        app(BookingService::class)->syncPostPlayers($game, ['Omar (GK)', 'Omar'], $admin);
         $this->assertSame(2, $game->fresh()->confirmedPlayers());
-        $this->assertSame('omar', Booking::plainName('Omar (GK)'));
+        $this->assertSame(Booking::plainName('Omar 🧤'), Booking::plainName('Omar (GK)'));
+        $this->assertNotSame(Booking::plainName('Omar 🧤'), Booking::plainName('Omar'));
     }
 }

@@ -16,13 +16,18 @@ class Booking extends Model
     /** Shown after a goalkeeper's name on the list. */
     public const GK_MARK = '🧤';
 
-    /** Name without the keeper mark, for comparing names ("Omar 🧤" = "Omar" = "Omar (GK)"). */
+    /**
+     * Name for comparing lists: "Omar (GK)" = "Omar GK" = "Omar 🧤", but "Omar 🧤" ≠ "Omar"
+     * (two different players can share a name; only the keeper carries the mark).
+     */
     public static function plainName(string $name): string
     {
+        $keeper = str_contains($name, self::GK_MARK) || preg_match('/\((gk|goalkeeper|keeper)\)|\bgk\b/iu', $name);
         $n = str_replace(self::GK_MARK, '', $name);
-        $n = preg_replace('/\((gk|goalkeeper|keeper)\)|\b(gk)\b/iu', '', $n) ?? $n;
+        $n = preg_replace('/\((gk|goalkeeper|keeper)\)|\bgk\b/iu', '', $n) ?? $n;
+        $n = mb_strtolower(trim(preg_replace('/\s+/u', ' ', $n) ?? $n));
 
-        return mb_strtolower(trim(preg_replace('/\s+/u', ' ', $n) ?? $n));
+        return $keeper ? $n.' '.self::GK_MARK : $n;
     }
 
     /** Fresh booking waiting for an admin: confirm straight away, or send a payment link first. */
