@@ -75,6 +75,14 @@ class ClientHandler
             }
         }
 
+        // The agent decided there's nothing to say (team is handling it, or "ok/thanks").
+        if ($reply !== null && preg_match('/^\s*\[silent\]\s*$/i', $reply)) {
+            $reply = null;
+        }
+        if ($reply) {
+            $reply = trim(str_ireplace('[SILENT]', '', $reply));
+        }
+
         if ($reply) {
             // Blank lines = separate bubbles, like a person texting (max 3).
             $parts = array_values(array_filter(array_map('trim', preg_split('/\n\s*\n/u', trim($reply)) ?: [$reply])));
