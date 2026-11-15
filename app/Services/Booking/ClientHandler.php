@@ -76,7 +76,17 @@ class ClientHandler
         }
 
         if ($reply) {
-            $this->messenger->text($contact->fresh(), $reply);
+            // Blank lines = separate bubbles, like a person texting (max 3).
+            $parts = array_values(array_filter(array_map('trim', preg_split('/\n\s*\n/u', trim($reply)) ?: [$reply])));
+            if (count($parts) > 3) {
+                $parts = [...array_slice($parts, 0, 2), implode("\n", array_slice($parts, 2))];
+            }
+            foreach ($parts ?: [$reply] as $k => $part) {
+                if ($k > 0) {
+                    usleep(700_000);
+                }
+                $this->messenger->text($contact->fresh(), $part);
+            }
         }
     }
 
