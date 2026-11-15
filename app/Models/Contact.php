@@ -9,7 +9,7 @@ class Contact extends Model
 {
     protected $fillable = [
         'wa_id', 'name', 'last_inbound_at', 'bot_paused_until', 'act_as_client', 'first_referral', 'source', 'reminders_opted_out_at', 'player_name', 'preferred_days',
-        'handoff_at', 'handoff_reason', 'handoff_reminders', 'saved_at', 'client_type', 'client_type_asked_at', 'tournament_interest_at',
+        'handoff_at', 'handoff_reason', 'handoff_reminders', 'saved_at', 'client_type', 'client_type_asked_at', 'tournament_interest_at', 'unavailable_until', 'unavailable_reason', 'availability_checked_message_id',
     ];
 
     protected function casts(): array
@@ -20,6 +20,7 @@ class Contact extends Model
             'saved_at' => 'datetime',
             'client_type_asked_at' => 'datetime',
             'tournament_interest_at' => 'datetime',
+            'unavailable_until' => 'date',
             'reminders_opted_out_at' => 'datetime',
             'handoff_at' => 'datetime',
             'handoff_reminders' => 'integer',

@@ -314,6 +314,14 @@ class AdminHandler
             return;
         }
 
+        if (preg_match('/^available\s+\+?([\d\s]{8,20})$/i', $text, $m)) {
+            $c = Contact::where('wa_id', \App\Support\Phone::normalize($m[1]))->first();
+            $c?->update(['unavailable_until' => null, 'unavailable_reason' => null]);
+            $this->reply($admin, $c ? "✅ +{$c->wa_id} is available again: back in suggestions." : 'No contact with that number.');
+
+            return;
+        }
+
         if ($lower === 'saved') {
             $this->reply($admin, '📇 '.Contact::whereNotNull('saved_at')->count().' saved old clients (treated as regulars). Send contact cards or a .vcf file to add more.');
 

@@ -18,6 +18,9 @@ use Illuminate\Support\Facades\DB;
  */
 class ReminderService
 {
+    /** @var string[] players left out this run because they said they can't play */
+    private array $unavailable = [];
+
     public function __construct(private readonly Messenger $messenger) {}
 
     /** Client said "I want to play on <date>". */
@@ -66,6 +69,7 @@ class ReminderService
      */
     public function notifyForGame(Game $game): int
     {
+        $this->unavailable = [];
         if (! config('fbl.reminders.enabled', true)) {
             return 0;
         }
@@ -116,6 +120,11 @@ class ReminderService
             if ($contact->isAdmin() || in_array($contact->id, $busy, true) || in_array($contact->id, $contacted, true)) {
                 continue;
             }
+            // Said in a chat they're injured / travelling / not available: not suggested until they're back.
+            if (app(\App\Services\Ai\AvailabilityReader::class)->check($contact) && app(\App\Services\Ai\AvailabilityReader::class)->isUnavailable($contact->fresh(), $day)) {
+                $this->unavailable[] = ($contact->player_name ?: $contact->name ?: '+'.$contact->wa_id).' ('.$contact->fresh()->unavailable_reason.', back '.$contact->fresh()->unavailable_until->format('j M').')';
+                continue;
+            }
             try {
                 DB::table('game_reminders')->insert([
                     'contact_id' => $contact->id, 'game_id' => $game->id, 'play_date' => $day,
@@ -149,6 +158,7 @@ class ReminderService
      */
     public function suggestForGame(Game $game, Contact $admin): array
     {
+        $this->unavailable = [];
         $tz = config('fbl.timezone');
         $local = $game->localStart();
         $day = $local->toDateString();
@@ -213,6 +223,11 @@ class ReminderService
             if ($contact->isAdmin() || in_array($contact->id, $busy, true) || in_array($contact->id, $contacted, true)) {
                 continue;
             }
+            // Said in a chat they're injured / travelling / not available: not suggested until they're back.
+            if (app(\App\Services\Ai\AvailabilityReader::class)->check($contact) && app(\App\Services\Ai\AvailabilityReader::class)->isUnavailable($contact->fresh(), $day)) {
+                $this->unavailable[] = ($contact->player_name ?: $contact->name ?: '+'.$contact->wa_id).' ('.$contact->fresh()->unavailable_reason.', back '.$contact->fresh()->unavailable_until->format('j M').')';
+                continue;
+            }
 
             $row = DB::table('game_reminders')->where('contact_id', $contact->id)->where('play_date', $day)->first();
             if ($row && $row->status === 'sent') {
@@ -255,7 +270,8 @@ class ReminderService
         $rank = ['tournament' => 0, 'asked' => 0, 'usual_day' => 1, 'recent' => 2, 'same_day' => 3, 'lapsed' => 4];
         $rows = $rows->sortBy(fn ($r) => [$r->status === 'sent' ? 1 : 0, $rank[$r->reason] ?? 9, $r->id])->values();
         $extra = ($namesWithoutNumber ? "\n\nAlso played recently (from your group lists, no number saved): ".implode(', ', $namesWithoutNumber) : '')
-            .($skipped ? "\n\n(Left out {$skipped} you already messaged today.)" : '');
+            .($skipped ? "\n\n(Left out {$skipped} you already messaged in the last 48h.)" : '')
+            .($this->unavailable ? "\n🚑 Not available (said so in chat): ".implode(', ', array_unique($this->unavailable)) : '');
         if ($rows->isEmpty()) {
             if ($only) {
                 $this->messenger->alertAdmin($only, "Nobody to invite for #{$game->id} right now.".$extra);
@@ -377,11 +393,11 @@ class ReminderService
     }
 
     /** Contacts already in, holding, or waiting on a game that day. */
-    /** @return int[] contacts the team messaged from the business number (phone or relayed) in the last 24h */
+    /** @return int[] contacts the team messaged from the business number (phone or relayed) in the last 48h */
     private function contactedByTeam(): array
     {
         return \App\Models\Message::where('direction', 'out')->whereIn('author', ['human', 'admin'])
-            ->where('created_at', '>', now()->subHours(24))->distinct()->pluck('contact_id')->map(fn ($id) => (int) $id)->all();
+            ->where('created_at', '>', now()->subHours((int) config('fbl.team_contacted_hours', 48)))->distinct()->pluck('contact_id')->map(fn ($id) => (int) $id)->all();
     }
 
     private function busyOn(string $day): array

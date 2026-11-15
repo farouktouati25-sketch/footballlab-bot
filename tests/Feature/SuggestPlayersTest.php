@@ -19,7 +19,9 @@ class SuggestPlayersTest extends TestCase
 
     public function test_suggest_messages_recent_players_in_window_and_lists_the_rest(): void
     {
-        Http::fake(fn () => Http::response(['messages' => [['id' => 'wamid.out.'.uniqid()]]]));
+        Http::fake(fn (Request $r) => str_contains($r->url(), 'anthropic')
+            ? Http::response(['content' => [['type' => 'text', 'text' => '{"unavailable": true, "until": null, "reason": "knee injury"}']], 'stop_reason' => 'end_turn'])
+            : Http::response(['messages' => [['id' => 'wamid.out.'.uniqid()]]]));
         $this->travelTo(Carbon::parse('2026-11-09 12:00', 'Asia/Dubai')); // Monday
 
         $game = $this->game('2026-11-10 21:00'); // Tuesday
@@ -35,6 +37,11 @@ class SuggestPlayersTest extends TestCase
         Booking::create(['contact_id' => null, 'source' => 'manual', 'game_id' => $sat->id, 'player_name' => 'Khalid', 'players' => 1, 'amount' => 53, 'status' => 'confirmed']);
 
         Contact::create(['wa_id' => self::ADMIN_1, 'last_inbound_at' => now()]);
+        // Said "injured" in the chat last week: Claude reads it and he's left out (shown as unavailable).
+        $hurt = Contact::create(['wa_id' => '971500000066', 'player_name' => 'Karim']);
+        \App\Models\Booking::create(['contact_id' => $hurt->id, 'game_id' => $this->game('2026-11-03 21:00')->id, 'player_name' => 'Karim', 'players' => 1, 'amount' => 53, 'status' => 'confirmed']);
+        \App\Models\Message::create(['contact_id' => $hurt->id, 'direction' => 'in', 'author' => 'client', 'type' => 'text', 'body' => "can't play bro I'm injured, back in 3 weeks"]);
+
         // Messaged by the team from the phone an hour ago: left out of the suggestions.
         $texted = Contact::create(['wa_id' => '971500000077', 'player_name' => 'Texted']);
         \App\Models\Booking::create(['contact_id' => $texted->id, 'game_id' => $this->game('2026-11-07 21:00')->id, 'player_name' => 'Texted', 'players' => 1, 'amount' => 53, 'status' => 'confirmed']);
@@ -50,6 +57,8 @@ class SuggestPlayersTest extends TestCase
             return ($r->data()['to'] ?? null) === self::ADMIN_1
                 && str_contains($body, 'Players to invite')
                 && ! str_contains($body, '971500000077')
+                && ! str_contains($body, '+971500000066')
+                && str_contains($body, 'Not available (said so in chat): Karim (knee injury')
                 && str_contains($body, '📱 ')
                 && str_contains($body, '+'.$sameDay->wa_id.' · played this weekday before')
                 && str_contains($body, '+'.$recent->wa_id.' · played in the last 3 days')

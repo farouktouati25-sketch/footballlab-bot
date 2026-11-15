@@ -103,6 +103,7 @@ return [
     'payment_timeout_minutes' => (int) env('FBL_PAYMENT_TIMEOUT_MINUTES', 120),
 
     // When a human replies from the phone app, the bot stays quiet in that chat for this long.
+    'team_contacted_hours' => (int) env('FBL_TEAM_CONTACTED_HOURS', 48), // suggest skips people the team messaged this recently
     'human_takeover_hours' => (int) env('FBL_HUMAN_TAKEOVER_HOURS', 24), // after a team member replies from the phone
 
     // The bot's own number (for "Book on WhatsApp" links), no + or spaces.
