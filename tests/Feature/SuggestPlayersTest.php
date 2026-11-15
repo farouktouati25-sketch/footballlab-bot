@@ -68,7 +68,7 @@ class SuggestPlayersTest extends TestCase
         });
         Http::assertSent(fn (Request $r) => ($r->data()['to'] ?? null) === self::ADMIN_1
             && ($r->data()['interactive']['action']['buttons'][0]['reply']['id'] ?? null) === "inv:{$game->id}"
-            && ($r->data()['interactive']['action']['buttons'][1]['reply']['title'] ?? null) === "👤 I'll invite");
+            && ($r->data()['interactive']['action']['buttons'][1]['reply']['title'] ?? null) === "👤 I'll contact them");
 
         // Admin taps "Send invites": Ali (chatted within 24h) gets it; Omar comes back as a phone list.
         $this->whatsappRaw(self::ADMIN_1, ['type' => 'interactive',

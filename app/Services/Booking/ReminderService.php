@@ -302,11 +302,14 @@ class ReminderService
                 "📣 Players to invite for #{$game->id} ({$game->label()} · {$game->spotsLeft()} left):\n\n{$lines}\n\n"
                 .($pending ? "🤖 I can message {$botCan} · 📱 {$this->plural($pending - $botCan)} only from your phone.\n💬 \"{$this->inviteText($game, null)}\"" : 'Everyone on the list has been messaged ✅')
                 .$extra) || $ok;
-            if ($pending && $admin->windowIsOpen()) {
-                $this->messenger->buttons($admin, "Who invites them for #{$game->id}?",
-                    ['inv:'.$game->id => '🤖 Bot invites', 'invno:'.$game->id => '👤 I\'ll invite']);
+            if ($pending && $botCan === 0) {
+                // Nobody the bot is allowed to message (24h rule): straight to the manual list.
+                $this->messenger->alertAdmin($admin, "📱 I can't message any of them (they haven't written to us in the last 24h).\n".$this->adminInvites($game));
+            } elseif ($pending && $admin->windowIsOpen()) {
+                $this->messenger->buttons($admin, "Want me to send the invite to the {$botCan} I can reach? The others are for you.",
+                    ['inv:'.$game->id => '🤖 Yes, bot invites', 'invno:'.$game->id => '👤 I\'ll contact them']);
             } elseif ($pending) {
-                $this->messenger->alertAdmin($admin, "Reply: bot invites {$game->id} · or invite them yourself");
+                $this->messenger->alertAdmin($admin, "Reply: bot invites {$game->id} · or contact them yourself");
             }
         }
 
