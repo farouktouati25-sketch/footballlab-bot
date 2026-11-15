@@ -35,6 +35,11 @@ class SuggestPlayersTest extends TestCase
         Booking::create(['contact_id' => null, 'source' => 'manual', 'game_id' => $sat->id, 'player_name' => 'Khalid', 'players' => 1, 'amount' => 53, 'status' => 'confirmed']);
 
         Contact::create(['wa_id' => self::ADMIN_1, 'last_inbound_at' => now()]);
+        // Messaged by the team from the phone an hour ago: left out of the suggestions.
+        $texted = Contact::create(['wa_id' => '971500000077', 'player_name' => 'Texted']);
+        \App\Models\Booking::create(['contact_id' => $texted->id, 'game_id' => $this->game('2026-11-07 21:00')->id, 'player_name' => 'Texted', 'players' => 1, 'amount' => 53, 'status' => 'confirmed']);
+        \App\Models\Message::create(['contact_id' => $texted->id, 'direction' => 'out', 'author' => 'human', 'type' => 'text', 'body' => 'game tomorrow?']);
+
         $this->whatsapp(self::ADMIN_1, 'suggest'); // no number: the next open game with spots
 
         // Nothing goes to players before the admin confirms.
@@ -44,6 +49,7 @@ class SuggestPlayersTest extends TestCase
 
             return ($r->data()['to'] ?? null) === self::ADMIN_1
                 && str_contains($body, 'Players to invite')
+                && ! str_contains($body, '971500000077')
                 && str_contains($body, '📱 ')
                 && str_contains($body, '+'.$sameDay->wa_id.' · played this weekday before')
                 && str_contains($body, '+'.$recent->wa_id.' · played in the last 3 days')

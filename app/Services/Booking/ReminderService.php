@@ -109,10 +109,11 @@ class ReminderService
         }
 
         $busy = $this->busyOn($day);
+        $contacted = $this->contactedByTeam();
         $listed = 0;
         $contacts = Contact::whereIn('id', array_keys($recipients))->whereNull('reminders_opted_out_at')->get();
         foreach ($contacts as $contact) {
-            if ($contact->isAdmin() || in_array($contact->id, $busy, true)) {
+            if ($contact->isAdmin() || in_array($contact->id, $busy, true) || in_array($contact->id, $contacted, true)) {
                 continue;
             }
             try {
@@ -198,6 +199,7 @@ class ReminderService
 
         // Not the people already in that day, and not names already on this game's list.
         $busy = $this->busyOn($day);
+        $contacted = $this->contactedByTeam();
         $inGame = $game->bookings()->whereIn('status', ['pending_payment', 'awaiting_approval', 'confirmed'])
             ->pluck('player_name')->map(fn ($n) => mb_strtolower(trim((string) $n)))->all();
         foreach ($inGame as $n) {
@@ -208,7 +210,7 @@ class ReminderService
         $manual = 0;
         $contacts = Contact::whereIn('id', array_keys($recipients))->whereNull('reminders_opted_out_at')->get();
         foreach ($contacts as $contact) {
-            if ($contact->isAdmin() || in_array($contact->id, $busy, true)) {
+            if ($contact->isAdmin() || in_array($contact->id, $busy, true) || in_array($contact->id, $contacted, true)) {
                 continue;
             }
 
@@ -245,10 +247,15 @@ class ReminderService
     /** The list + a message the admin can copy and send from the phone. */
     public function sendInviteList(Game $game, ?Contact $only = null, ?int $directNow = null, array $namesWithoutNumber = []): bool
     {
-        $rows = DB::table('game_reminders')->where('game_id', $game->id)->whereIn('status', ['manual', 'sent'])->get();
+        // People one of you already messaged from the business number today are left out.
+        $contacted = $this->contactedByTeam();
+        $all = DB::table('game_reminders')->where('game_id', $game->id)->whereIn('status', ['manual', 'sent'])->get();
+        $rows = $all->reject(fn ($r) => $r->status === 'manual' && in_array($r->contact_id, $contacted, true))->values();
+        $skipped = $all->count() - $rows->count();
         $rank = ['tournament' => 0, 'asked' => 0, 'usual_day' => 1, 'recent' => 2, 'same_day' => 3, 'lapsed' => 4];
         $rows = $rows->sortBy(fn ($r) => [$r->status === 'sent' ? 1 : 0, $rank[$r->reason] ?? 9, $r->id])->values();
-        $extra = $namesWithoutNumber ? "\n\nAlso played recently (from your group lists, no number saved): ".implode(', ', $namesWithoutNumber) : '';
+        $extra = ($namesWithoutNumber ? "\n\nAlso played recently (from your group lists, no number saved): ".implode(', ', $namesWithoutNumber) : '')
+            .($skipped ? "\n\n(Left out {$skipped} you already messaged today.)" : '');
         if ($rows->isEmpty()) {
             if ($only) {
                 $this->messenger->alertAdmin($only, "Nobody to invite for #{$game->id} right now.".$extra);
@@ -324,7 +331,7 @@ class ReminderService
         $phone = [];
         foreach (DB::table('game_reminders')->where('game_id', $game->id)->where('status', 'manual')->get() as $row) {
             $c = Contact::find($row->contact_id);
-            if (! $c || $c->reminders_opted_out_at || in_array($c->id, $busy, true)) {
+            if (! $c || $c->reminders_opted_out_at || in_array($c->id, $busy, true) || in_array($c->id, $this->contactedByTeam(), true)) {
                 continue;
             }
             $name = $c->player_name ?: $c->name ?: '+'.$c->wa_id;
@@ -370,6 +377,13 @@ class ReminderService
     }
 
     /** Contacts already in, holding, or waiting on a game that day. */
+    /** @return int[] contacts the team messaged from the business number (phone or relayed) in the last 24h */
+    private function contactedByTeam(): array
+    {
+        return \App\Models\Message::where('direction', 'out')->whereIn('author', ['human', 'admin'])
+            ->where('created_at', '>', now()->subHours(24))->distinct()->pluck('contact_id')->map(fn ($id) => (int) $id)->all();
+    }
+
     private function busyOn(string $day): array
     {
         $tz = config('fbl.timezone');
