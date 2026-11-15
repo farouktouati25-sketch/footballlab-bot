@@ -62,8 +62,8 @@ class AvailabilityReader
                 $until = ! empty($json['until']) ? Carbon::parse($json['until'], $tz) : null;
             } catch (\Throwable) {
             }
-            // No date given: leave them out for 2 weeks after they said it.
-            $until ??= Carbon::parse($hits->last()->created_at)->setTimezone($tz)->addDays(14);
+            // No date given: leave them out for a week after they said it.
+            $until ??= Carbon::parse($hits->last()->created_at)->setTimezone($tz)->addDays((int) config('fbl.unavailable_default_days', 7));
             $contact->update(['unavailable_until' => $until->toDateString(), 'unavailable_reason' => mb_substr((string) ($json['reason'] ?? 'not available'), 0, 120)]);
         } elseif (isset($json['unavailable']) && $contact->unavailable_until) {
             $contact->update(['unavailable_until' => null, 'unavailable_reason' => null]); // they said they're back

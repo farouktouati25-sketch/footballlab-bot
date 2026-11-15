@@ -103,6 +103,7 @@ return [
     'payment_timeout_minutes' => (int) env('FBL_PAYMENT_TIMEOUT_MINUTES', 120),
 
     // When a human replies from the phone app, the bot stays quiet in that chat for this long.
+    'unavailable_default_days' => (int) env('FBL_UNAVAILABLE_DEFAULT_DAYS', 7), // "injured/travelling" with no date given
     'team_contacted_hours' => (int) env('FBL_TEAM_CONTACTED_HOURS', 48), // suggest skips people the team messaged this recently
     'human_takeover_hours' => (int) env('FBL_HUMAN_TAKEOVER_HOURS', 24), // after a team member replies from the phone
 
