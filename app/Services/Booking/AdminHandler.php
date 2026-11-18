@@ -588,16 +588,15 @@ class AdminHandler
     /** Confirmed now, and the admin will send a payment link (bot asks for it; reply to that message with the link). */
     private function confirmAndLink(Contact $admin, int $bookingId): void
     {
-        $outcome = $this->bookings->decide($bookingId, $admin, true);
-        if ($outcome['result'] === 'done') {
-            app(\App\Services\Payments\PaymentService::class)->requestLinkFromAdmins($outcome['booking']->fresh(['game', 'contact']));
-        } elseif ($outcome['result'] === 'already') {
-            $this->notifier->alreadyDecided($admin, $outcome['booking']);
-        } elseif ($outcome['result'] === 'full') {
-            $this->reply($admin, "⚠️ Can't confirm: game #{$outcome['game']->id} is full. Tap ❌ Full to tell them.");
-        } else {
+        // Spot held (not on the list yet): the bot asks you for the link; once they pay and send the screenshot,
+        // you approve it and only then they're confirmed and added to the list.
+        $booking = Booking::with(['game', 'contact'])->find($bookingId);
+        if (! $booking) {
             $this->reply($admin, 'That booking no longer exists.');
+
+            return;
         }
+        $this->linkInstead($admin, $booking);
     }
 
     /** "Full": tell the client kindly and offer the waiting list. */

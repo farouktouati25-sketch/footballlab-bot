@@ -52,7 +52,7 @@ class AdminConfirmsFirstTest extends TestCase
         $this->assertNull($booking->link_requested_at);
         Http::assertSent(fn (Request $r) => ($r->data()['to'] ?? null) === self::ADMIN_1
             && ($r->data()['interactive']['action']['buttons'][0]['reply']['title'] ?? null) === '✅ Confirm'
-            && ($r->data()['interactive']['action']['buttons'][1]['reply']['title'] ?? null) === '💳 Confirm + link'
+            && ($r->data()['interactive']['action']['buttons'][1]['reply']['title'] ?? null) === '💳 Hold + link'
             && ($r->data()['interactive']['action']['buttons'][2]['reply']['title'] ?? null) === '❌ Full');
         // Nothing to the client until an admin decides.
         Http::assertNotSent(fn (Request $r) => ($r->data()['to'] ?? null) === self::CLIENT);
@@ -63,21 +63,39 @@ class AdminConfirmsFirstTest extends TestCase
         Http::assertSent(fn (Request $r) => ($r->data()['to'] ?? null) === self::CLIENT && str_contains($r->data()['text']['body'] ?? '', "You're in"));
     }
 
-    public function test_admin_confirms_and_sends_a_link(): void
+    public function test_hold_and_link_keeps_them_off_the_list_until_paid_with_reminders(): void
     {
         $booking = $this->book();
         $this->tap("cnflink:{$booking->id}");
 
         $booking->refresh();
-        $this->assertSame('confirmed', $booking->status);
-        $this->assertNotNull($booking->link_requested_at);
+        $this->assertSame('pending_payment', $booking->status); // held, not on the list
+        $this->assertSame(0, $booking->game->fresh()->confirmedPlayers());
         Http::assertSent(fn (Request $r) => ($r->data()['to'] ?? null) === self::ADMIN_1
             && str_contains($r->data()['text']['body'] ?? '', 'needs a payment link'));
 
-        // Admin replies with the link: it goes to the confirmed client.
+        // Admin replies with the link: it goes to the client, the 2h hold starts.
         $this->whatsapp(self::ADMIN_1, "{$booking->reference} https://pay.ziina.com/abc");
         Http::assertSent(fn (Request $r) => ($r->data()['to'] ?? null) === self::CLIENT
             && str_contains($r->data()['text']['body'] ?? '', 'https://pay.ziina.com/abc'));
+
+        // 1h later, not paid: the client is reminded once and the admins are told.
+        $this->travel(61)->minutes();
+        Contact::where('wa_id', self::CLIENT)->update(['last_inbound_at' => now()]);
+        Contact::where('wa_id', self::ADMIN_1)->update(['last_inbound_at' => now()]);
+        $this->artisan('bookings:housekeeping')->assertSuccessful();
+        $this->artisan('bookings:housekeeping')->assertSuccessful();
+        $this->assertSame(1, Http::recorded(fn (Request $r) => ($r->data()['to'] ?? null) === self::CLIENT
+            && str_contains($r->data()['text']['body'] ?? '', 'kind reminder please'))->count());
+        Http::assertSent(fn (Request $r) => ($r->data()['to'] ?? null) === self::ADMIN_1
+            && str_contains($r->data()['text']['body'] ?? '', "hasn't paid yet"));
+
+        // 2h passed: released, admins told.
+        $this->travel(60)->minutes();
+        $this->artisan('bookings:housekeeping')->assertSuccessful();
+        $this->assertSame('expired', $booking->fresh()->status);
+        Http::assertSent(fn (Request $r) => ($r->data()['to'] ?? null) === self::ADMIN_1
+            && str_contains($r->data()['text']['body'] ?? '', "didn't pay in time"));
     }
 
     public function test_admin_says_full(): void

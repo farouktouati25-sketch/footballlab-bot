@@ -28,6 +28,24 @@ class BookingHousekeeping extends Command
 
         $cutoff = now()->subMinutes((int) config('fbl.payment_timeout_minutes', 120));
 
+        // 0c) Link sent, no payment yet, halfway through the hold: remind the client once and tell the admins.
+        $half = now()->subMinutes(intdiv((int) config('fbl.payment_timeout_minutes', 120), 2));
+        Booking::with(['game', 'contact'])->where('status', 'pending_payment')->where('payment_verified', false)
+            ->whereNotNull('payment_url')->whereNull('payment_proof_media_id')->whereNull('payment_reminded_at')
+            ->where('created_at', '<=', $half)->where('created_at', '>', $cutoff)
+            ->get()->each(function (Booking $b) use ($messenger) {
+                $b->update(['payment_reminded_at' => now()]);
+                $left = max(5, (int) config('fbl.payment_timeout_minutes', 120) - (int) $b->created_at->diffInMinutes(now()));
+                if ($b->contact && ! $b->contact->botIsPaused()) {
+                    $first = preg_split('/\s+/u', trim(str_replace(Booking::GK_MARK, '', (string) $b->player_name)))[0] ?? '';
+                    $messenger->updateClient($b->contact, $b->reference,
+                        "hey {$first} 👋 kind reminder please, your spot is held for about {$left} more minutes\n{$b->payment_url}\n\nsend the screenshot here after paying, thank you 🙏");
+                }
+                foreach ($messenger->adminContacts() as $admin) {
+                    $messenger->alertAdmin($admin, "⏰ {$b->player_name} ({$b->reference}) hasn't paid yet · {$b->game->label()} · {$left} min left on the hold. I reminded them.");
+                }
+            });
+
         // 1) Unpaid holds past the timeout free their spots.
         //    lazyById: rows leave the filter as we go, so offset paging would skip some.
         //    Conditional update: an admin may confirm, or the client report payment, in the meantime.
@@ -50,6 +68,10 @@ class BookingHousekeeping extends Command
                     return;
                 }
 
+                $b = $booking->fresh(['game']);
+                foreach ($messenger->adminContacts() as $admin) {
+                    $messenger->alertAdmin($admin, "⌛ {$b->player_name} ({$b->reference}) didn't pay in time: spot released · {$b->game?->label()}");
+                }
                 $contact = $booking->contact()->first();
                 if ($contact && ! $contact->botIsPaused()) {
                     $messenger->text($contact,
