@@ -108,6 +108,38 @@ class AdminConfirmsFirstTest extends TestCase
             && str_contains($r->data()['text']['body'] ?? '', 'is full'));
     }
 
+    public function test_client_says_done_without_screenshot_admin_checks(): void
+    {
+        $booking = $this->book();
+        $this->tap("cnflink:{$booking->id}");
+        $this->whatsapp(self::ADMIN_1, "{$booking->reference} https://pay.ziina.com/abc");
+
+        $this->claude = [
+            ['content' => [['type' => 'tool_use', 'id' => 'p1', 'name' => 'report_payment', 'input' => ['booking_reference' => $booking->reference, 'note' => 'done']]], 'stop_reason' => 'tool_use'],
+            ['content' => [['type' => 'text', 'text' => 'ok']], 'stop_reason' => 'end_turn'],
+        ];
+        $this->whatsapp(self::CLIENT, 'done');
+
+        $this->assertSame('awaiting_approval', $booking->fresh()->status);
+        Http::assertSent(fn (Request $r) => ($r->data()['to'] ?? null) === self::ADMIN_1
+            && ($r->data()['interactive']['action']['buttons'][0]['reply']['title'] ?? null) === '✅ Received'
+            && ($r->data()['interactive']['action']['buttons'][1]['reply']['title'] ?? null) === '❌ Not received');
+
+        $this->tap("reject:{$booking->id}");
+        $this->assertSame('pending_payment', $booking->fresh()->status); // spot still held
+        Http::assertSent(fn (Request $r) => ($r->data()['to'] ?? null) === self::CLIENT
+            && str_contains($r->data()['text']['body'] ?? '', "couldn't find your payment yet"));
+
+        // Second try: received → confirmed.
+        $this->claude = [
+            ['content' => [['type' => 'tool_use', 'id' => 'p2', 'name' => 'report_payment', 'input' => ['booking_reference' => $booking->reference, 'note' => 'paid now']]], 'stop_reason' => 'tool_use'],
+            ['content' => [['type' => 'text', 'text' => 'ok']], 'stop_reason' => 'end_turn'],
+        ];
+        $this->whatsapp(self::CLIENT, 'paid now');
+        $this->tap("approve:{$booking->id}");
+        $this->assertSame('confirmed', $booking->fresh()->status);
+    }
+
     private function tap(string $id): void
     {
         $this->post_(self::ADMIN_1, ['type' => 'interactive', 'interactive' => ['type' => 'button_reply', 'button_reply' => ['id' => $id, 'title' => 'x']]]);

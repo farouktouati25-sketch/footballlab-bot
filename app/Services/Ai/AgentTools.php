@@ -46,7 +46,7 @@ class AgentTools
             ],
             [
                 'name' => 'report_payment',
-                'description' => 'Use when the client says they have paid but did NOT send a screenshot. Sends the booking to the team for approval. Ask for a screenshot first; only use this if they cannot send one.',
+                'description' => 'Use as soon as the client says they paid ("done", "paid", "payment done"…) without sending a screenshot. The team checks the payment and confirms; the client hears back from them. Silent.',
                 'input_schema' => [
                     'type' => 'object',
                     'properties' => [

@@ -33,6 +33,13 @@ class Booking extends Model
     /** Fresh booking waiting for an admin: confirm straight away, or send a payment link first. */
     public const NEW_BOOKING_NOTE = 'NEW BOOKING';
 
+    /** Client said "paid/done" without a screenshot: the admin checks the account. */
+    public function saidPaidNoProof(): bool
+    {
+        return $this->status === 'awaiting_approval' && ! $this->payment_proof_media_id && ! $this->payment_verified
+            && $this->payment_url && ! $this->wantsCash() && $this->payment_note !== self::NEW_BOOKING_NOTE;
+    }
+
     public function isNewBookingRequest(): bool
     {
         return $this->status === 'awaiting_approval' && $this->payment_note === self::NEW_BOOKING_NOTE

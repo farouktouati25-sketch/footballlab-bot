@@ -620,6 +620,27 @@ class AdminHandler
         }
     }
 
+    /** "Paid" but nothing arrived: back to waiting for payment (spot still held), the client is asked kindly to check. */
+    private function paymentNotReceived(Contact $admin, Booking $booking): void
+    {
+        $moved = Booking::whereKey($booking->id)->where('status', 'awaiting_approval')
+            ->update(['status' => 'pending_payment', 'payment_reported_at' => null, 'decided_by' => $admin->wa_id, 'decided_at' => now()]);
+        if (! $moved) {
+            $this->notifier->alreadyDecided($admin, $booking->fresh());
+
+            return;
+        }
+        $b = $booking->fresh(['game', 'contact']);
+        if ($b->contact) {
+            $first = preg_split('/\s+/u', trim(str_replace(Booking::GK_MARK, '', (string) $b->player_name)))[0] ?? '';
+            $this->messenger->updateClient($b->contact, $b->reference,
+                "hey {$first}, we couldn't find your payment yet 🙏 kindly check it went through and send me the screenshot please\n{$b->payment_url}");
+        }
+        foreach ($this->messenger->adminContacts() as $other) {
+            $this->messenger->alertAdmin($other, "❌ {$b->player_name} ({$b->reference}): payment not received ({$admin->adminName()}). Asked them to check, spot still held.");
+        }
+    }
+
     /** New booking: the admin wants payment first. Ask for the link now (reply to that message with it). */
     private function linkInstead(Contact $admin, Booking $booking): void
     {
@@ -695,6 +716,11 @@ class AdminHandler
         $pending = Booking::with(['game', 'contact'])->find($bookingId);
         if (! $approve && $pending && $pending->isNewBookingRequest()) {
             $this->linkInstead($admin, $pending);
+
+            return;
+        }
+        if (! $approve && $pending && $pending->saidPaidNoProof()) {
+            $this->paymentNotReceived($admin, $pending);
 
             return;
         }

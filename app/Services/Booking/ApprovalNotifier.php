@@ -48,8 +48,10 @@ class ApprovalNotifier
         }
 
         $buttons = [
-            'approve:'.$booking->id => $booking->wantsCash() && ! $booking->payment_proof_media_id ? '✅ Book him' : '✅ Confirm',
-            'reject:'.$booking->id => $booking->isNewBookingRequest() || ($booking->wantsCash() && ! $booking->payment_proof_media_id) ? '💳 Send link' : '❌ Reject',
+            'approve:'.$booking->id => $booking->wantsCash() && ! $booking->payment_proof_media_id ? '✅ Book him'
+                : ($booking->saidPaidNoProof() ? '✅ Received' : '✅ Confirm'),
+            'reject:'.$booking->id => $booking->isNewBookingRequest() || ($booking->wantsCash() && ! $booking->payment_proof_media_id) ? '💳 Send link'
+                : ($booking->saidPaidNoProof() ? '❌ Not received' : '❌ Reject'),
         ];
 
         foreach ($this->messenger->adminContacts() as $admin) {
