@@ -181,7 +181,8 @@ class WhatsAppWebhookController extends Controller
         $body = $echo['text']['body'] ?? null;
         // The admin's invite from the list (checked first: the same copied text goes to many people).
         $invite = app(\App\Services\Booking\ReminderService::class)->isInviteEcho($contact);
-        $automatic = ! $invite && $this->isAutoReply($contact, $body);
+        // Messages Meta sends for us (the ad's welcome message, unsupported echoes) aren't the team taking over.
+        $automatic = ! $invite && (in_array($type, ['unsupported', 'unknown'], true) || $this->isAutoReply($contact, $body));
 
         Message::create([
             'contact_id' => $contact->id,

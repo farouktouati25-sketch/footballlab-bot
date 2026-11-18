@@ -85,18 +85,40 @@ class UnknownClientTest extends TestCase
         Http::assertSent(fn (Request $r) => ($r->data()['to'] ?? null) === self::ADMIN_1 && isset($r->data()['interactive']));
     }
 
-    public function test_nobody_answers_in_15_minutes_so_the_bot_replies_anyway(): void
+    public function test_nobody_answers_so_the_bot_keeps_waiting_and_reminds_admins(): void
     {
         $this->whatsapp(self::CLIENT, ['type' => 'text', 'text' => ['body' => 'Any game tonight?']]);
-        Http::assertNotSent(fn (Request $r) => ($r->data()['to'] ?? null) === self::CLIENT);
 
         $this->travel(16)->minutes();
         Contact::where('wa_id', self::ADMIN_1)->update(['last_inbound_at' => now()]);
         $this->artisan('bookings:housekeeping')->assertSuccessful();
+        $this->artisan('bookings:housekeeping')->assertSuccessful(); // reminded once per step
 
-        $this->assertSame('guess', Contact::where('wa_id', self::CLIENT)->sole()->client_type);
-        Http::assertSent(fn (Request $r) => ($r->data()['to'] ?? null) === self::CLIENT);
-        $this->assertStringContainsString('FIRST, CHECK WHO THIS REALLY IS', end($this->prompts));
+        $this->assertNull(Contact::where('wa_id', self::CLIENT)->sole()->client_type);
+        Http::assertNotSent(fn (Request $r) => ($r->data()['to'] ?? null) === self::CLIENT);
+        $this->assertSame(1, Http::recorded(fn (Request $r) => ($r->data()['to'] ?? null) === self::ADMIN_1
+            && str_contains($r->data()['text']['body'] ?? '', 'Still waiting'))->count());
+    }
+
+    public function test_ad_message_delivered_as_unsupported_is_answered_as_an_ad_lead(): void
+    {
+        $this->whatsapp('971505550000', ['type' => 'unsupported', 'errors' => [['code' => 131051]],
+            'referral' => ['source_type' => 'ad', 'source_id' => 'AD1', 'headline' => 'FootballLab']]);
+
+        $c = Contact::where('wa_id', '971505550000')->sole();
+        $this->assertSame('meta_ad', $c->source);
+        $this->assertSame('Hi FootballLab! I saw your ad and want to play ⚽', $c->messages()->where('direction', 'in')->sole()->body);
+        Http::assertSent(fn (Request $r) => ($r->data()['to'] ?? null) === '971505550000');
+        Http::assertNotSent(fn (Request $r) => str_contains(json_encode($r->data(), JSON_UNESCAPED_UNICODE), 'Do you know +971505550000'));
+    }
+
+    public function test_unsupported_message_without_ad_is_not_answered(): void
+    {
+        Contact::create(['wa_id' => self::CLIENT, 'client_type' => 'old', 'last_inbound_at' => now()]);
+        $this->whatsapp(self::CLIENT, ['type' => 'unsupported']);
+
+        Http::assertNotSent(fn (Request $r) => ($r->data()['to'] ?? null) === self::CLIENT);
+        Http::assertNotSent(fn (Request $r) => str_contains($r->url(), 'anthropic'));
     }
 
     public function test_ad_leads_and_new_answer_skip_or_get_the_lead_flow(): void

@@ -84,6 +84,13 @@ final class InboundMessage
                 break;
         }
 
+        // Click-to-WhatsApp ads (welcome message + pre-filled text) can arrive as "unsupported" with the ad referral:
+        // treat it as the lead's opening line instead of an unknown message.
+        if (in_array($type, ['unsupported', 'unknown', 'request_welcome'], true) && isset($message['referral']) && is_array($message['referral'])) {
+            $type = 'text';
+            $text = (string) config('fbl.ad_opening_line');
+        }
+
         return new self(
             id: (string) ($message['id'] ?? ''),
             from: $from,

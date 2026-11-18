@@ -24,6 +24,7 @@ class BookingAgent
             ->limit((int) config('claude.history_limit', 24))
             ->get(['author', 'body'])
             ->reverse()
+            ->reject(fn ($m) => preg_match('/^\[(unsupported|unknown|request_welcome) (message|sent by team)\]$/', (string) $m->body))
             ->map(fn ($m) => ['author' => $m->author, 'body' => $m->body])
             ->values()
             ->all();

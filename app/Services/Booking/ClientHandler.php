@@ -27,6 +27,17 @@ class ClientHandler
             return;
         }
 
+        // A message WhatsApp can't show us (ad welcome flow, poll, view-once…): never answer it blindly.
+        if (in_array($inbound->type, ['unsupported', 'unknown', 'request_welcome'], true)) {
+            $firstFromAd = $contact->source === 'meta_ad'
+                && ! $contact->messages()->where('direction', 'out')->where('author', 'bot')->exists();
+            if (! $firstFromAd) {
+                return; // their next real message gets the answer
+            }
+            // An ad lead's opening message: answer it as "I saw your ad and want to play".
+            $logged->update(['type' => 'text', 'body' => (string) config('fbl.ad_opening_line')]);
+        }
+
         if ($inbound->type === 'text' && ($optReply = $this->reminders->handleOptCommand($contact, (string) $inbound->text)) !== null) {
             $this->messenger->text($contact->fresh(), $optReply);
 

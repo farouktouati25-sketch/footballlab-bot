@@ -104,6 +104,8 @@ return [
 
     // When a human replies from the phone app, the bot stays quiet in that chat for this long.
     'unavailable_default_days' => (int) env('FBL_UNAVAILABLE_DEFAULT_DAYS', 7), // "injured/travelling" with no date given
+    // What an ad lead's first message means when WhatsApp delivers it as "unsupported" (ad welcome flow).
+    'ad_opening_line' => env('FBL_AD_OPENING_LINE', 'Hi FootballLab! I saw your ad and want to play ⚽'),
     'team_contacted_hours' => (int) env('FBL_TEAM_CONTACTED_HOURS', 48), // suggest skips people the team messaged this recently
     'human_takeover_hours' => (int) env('FBL_HUMAN_TAKEOVER_HOURS', 24), // after a team member replies from the phone
 

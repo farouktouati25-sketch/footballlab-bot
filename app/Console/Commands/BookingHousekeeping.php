@@ -87,14 +87,18 @@ class BookingHousekeeping extends Command
             ->get()
             ->each(fn ($game) => $roster->offerFreedSpots($game));
 
-        // 2c) Unknown numbers nobody on the team identified within 15 min: the bot answers anyway (guessing from their words).
+        // 2c) Unknown numbers nobody identified yet: the bot keeps waiting for you (it never guesses), reminders at 15 min and 1 h.
         \App\Models\Contact::whereNull('client_type')->whereNotNull('client_type_asked_at')
-            ->where('client_type_asked_at', '<=', now()->subMinutes((int) config('fbl.ask_admin_wait_minutes', 15)))->get()
-            ->each(function (\App\Models\Contact $c) {
-                $c->update(['client_type' => 'guess']);
-                $last = $c->messages()->latest('id')->first();
-                if ($last && $last->direction === 'in' && ! $c->botIsPaused()) {
-                    app(\App\Services\Booking\ClientHandler::class)->replyNow($c, $last);
+            ->where('client_type_asked_at', '>', now()->subDay())->get()
+            ->each(function (\App\Models\Contact $c) use ($messenger) {
+                $mins = (int) $c->client_type_asked_at->diffInMinutes(now());
+                foreach ([15, 60] as $step) {
+                    if ($mins >= $step && \Illuminate\Support\Facades\Cache::add("fbl:who-reminded:{$c->id}:{$step}", true, now()->addDay())) {
+                        foreach ($messenger->adminContacts() as $admin) {
+                            $messenger->alertAdmin($admin, "⏰ Still waiting ({$mins} min): is +{$c->wa_id}".($c->name ? " ({$c->name})" : '')
+                                ." an old client or a new player? I haven't replied to them. Reply: old {$c->wa_id} / new {$c->wa_id}");
+                        }
+                    }
                 }
             });
 
