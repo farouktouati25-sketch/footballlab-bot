@@ -61,7 +61,6 @@ class Booking extends Model
             'link_requested_at' => 'datetime',
             'link_due_at' => 'datetime',
             'payment_reminded_at' => 'datetime',
-        'payment_reminded_at' => 'datetime',
             'decided_at' => 'datetime',
             'admin_reminded_at' => 'datetime',
         ];
