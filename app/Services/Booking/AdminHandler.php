@@ -36,6 +36,7 @@ class AdminHandler
         ."• cancel game 12 → stop bookings for a game\n"
         ."• edit 12 format 8v8 / edit 12 price 60 / edit 12 spots 16 → change a game (format also opens a weekly game)\n"
         ."• pause 9715… / resume 9715… → bot off/on for a client\n"
+        ."• remind Harith (or remind FBL-XXXXX, or reply remind to my message about the booking) → payment reminder with their link; just remind → everyone unpaid\n"
         ."• Old clients: share their contact cards (or a .vcf) with me, or send saved 9715… → the bot treats them as regulars (unsave 9715… to undo)\n"
         ."• #test → chat with the bot as a client (send #test again to exit)";
 
@@ -65,6 +66,13 @@ class AdminHandler
 
         $text = trim((string) $inbound->text);
         $lower = mb_strtolower($text);
+
+        // "remind" (reply to a message about a booking, or "remind Harith" / "remind FBL-XXXXX"): payment reminder.
+        if (preg_match('/^remind(?:\s+(.+))?$/iu', $text, $m)) {
+            $this->remindPayment($admin, trim($m[1] ?? ''), $inbound->replyToId);
+
+            return;
+        }
 
         // Admin replied to a client's question I forwarded: send the answer to the client.
         if ($text !== '' && $inbound->replyToId) {
@@ -514,6 +522,67 @@ class AdminHandler
             'who' => $this->setClientType($admin, Contact::find((int) strtok($ref, ':')), (string) substr((string) strrchr($ref, ':'), 1)),
             default => $this->reply($admin, self::HELP),
         };
+    }
+
+    /** Unpaid bookings that already have a payment link, upcoming games. */
+    private function unpaidWithLink()
+    {
+        return Booking::with(['game', 'contact'])->whereIn('status', ['pending_payment', 'confirmed'])
+            ->whereNotNull('payment_url')->where('payment_verified', false)->whereNull('payment_proof_media_id')
+            ->whereHas('game', fn ($g) => $g->where('starts_at', '>', now()->subHours(3)));
+    }
+
+    private function remindPayment(Contact $admin, string $who, ?string $replyToId): void
+    {
+        $booking = null;
+        if ($who === '' && $replyToId) {
+            // The quoted message: a booking alert from me (booking id saved with it, or its FBL reference in the text).
+            $quoted = \App\Models\Message::where('wa_message_id', $replyToId)->first();
+            $id = $quoted?->payload['booking_id'] ?? null;
+            if (! $id && preg_match('/FBL-[A-Z0-9]{5}/i', (string) $quoted?->body, $r)) {
+                $id = Booking::findByReference($r[0])?->id;
+            }
+            $booking = $id ? $this->unpaidWithLink()->find($id) : null;
+            if (! $booking) {
+                $this->reply($admin, "I can't find an unpaid booking with a link in that message. Try: remind Harith");
+
+                return;
+            }
+        } elseif ($who === '') {
+            $list = $this->unpaidWithLink()->get();
+            $this->reply($admin, $list->isEmpty() ? 'Nobody with an unpaid payment link right now 👍'
+                : "Unpaid with a link:\n".$list->map(fn (Booking $b) => "• remind {$b->reference} → {$b->player_name} · {$b->game->label()} · {$b->amountLabel()}")->implode("\n"));
+
+            return;
+        } else {
+            $digits = preg_replace('/\D/', '', $who);
+            $matches = $this->unpaidWithLink()->where(function ($q) use ($who, $digits) {
+                $q->where('reference', mb_strtoupper($who))->orWhere('player_name', 'like', '%'.$who.'%');
+                if (strlen($digits) >= 6) {
+                    $q->orWhereHas('contact', fn ($c) => $c->where('wa_id', 'like', '%'.$digits));
+                }
+            })->get();
+            if ($matches->count() !== 1) {
+                $this->reply($admin, $matches->isEmpty()
+                    ? "No unpaid booking with a payment link for \"{$who}\". Send: remind (to see everyone unpaid)"
+                    : "Which one?\n".$matches->map(fn (Booking $b) => "• remind {$b->reference} → {$b->player_name} · {$b->game->label()}")->implode("\n"));
+
+                return;
+            }
+            $booking = $matches->first();
+        }
+
+        if (! $booking->contact) {
+            $this->reply($admin, "{$booking->player_name} has no WhatsApp number saved, remind them yourself.");
+
+            return;
+        }
+        $first = preg_split('/\s+/u', trim(str_replace(Booking::GK_MARK, '', (string) $booking->player_name)))[0] ?? '';
+        $sent = $this->messenger->updateClient($booking->contact, $booking->reference,
+            "hey {$first} 👋 just a kind reminder for the payment of your spot ({$booking->game->label()}, {$booking->amountLabel()})\n{$booking->payment_url}\n\nplease send the screenshot here after paying, thank you 🙏");
+        $this->reply($admin, $sent
+            ? "✅ Reminder sent to {$booking->player_name} ({$booking->reference})."
+            : "⚠️ Couldn't send it (chat closed, 24h rule). Message +{$booking->contact->wa_id} from your phone.");
     }
 
     /** Confirmed now, and the admin will send a payment link (bot asks for it; reply to that message with the link). */
